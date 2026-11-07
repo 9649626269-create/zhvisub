@@ -29,8 +29,9 @@ jobs:
           distribution: 'temurin'
           java-version: '21'
 
-      - name: 4. Cài đặt Android SDK
-        uses: android-actions/setup-android@v3
+      - name: 4. Chấp nhận Android SDK Licenses
+        run: |
+          yes | sdkmanager --licenses || true
 
       - name: 5. Cài đặt thư viện Web (npm ci)
         run: |
