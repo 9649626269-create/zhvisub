@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import UploadCard from "../components/UploadCard";
 import ProcessingOptions from "../components/ProcessingOptions";
 import DubbingOptions from "../components/DubbingOptions";
@@ -12,9 +13,12 @@ import {
   fetchVoices,
   VoiceItem,
   getGuestApiKey,
+  isCapacitorApp,
+  isLocalhostUrl,
+  getApiBaseUrl,
 } from "../lib/api";
 import { toast } from "../lib/toast";
-import { Sparkles, Loader2, ArrowRight, CloudCheck, Play } from "lucide-react";
+import { Sparkles, Loader2, Play, AlertTriangle, Settings as SettingsIcon } from "lucide-react";
 
 export default function CreateJobPage() {
   const router = useRouter();
@@ -42,9 +46,12 @@ export default function CreateJobPage() {
   // Submitting states
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [uploadPercent, setUploadPercent] = useState<number>(0);
+  const [isMobileLocalhost, setIsMobileLocalhost] = useState<boolean>(false);
 
-  // Load voices on mount
+  // Check mobile & load voices on mount
   useEffect(() => {
+    setIsMobileLocalhost(isCapacitorApp() && isLocalhostUrl(getApiBaseUrl()));
+
     fetchVoices()
       .then((data) => {
         if (data && data.length > 0) {
@@ -65,6 +72,11 @@ export default function CreateJobPage() {
   const canSubmit = hasVideo && isKeyValid && !isSubmitting;
 
   const handleSubmit = async () => {
+    if (isCapacitorApp() && isLocalhostUrl(getApiBaseUrl())) {
+      toast.error("Điện thoại không truy cập được localhost. Hãy vào Cài đặt để nhập IP máy tính!");
+      return;
+    }
+
     if (!hasVideo) {
       toast.error("Vui lòng chọn file video hoặc dán đường link video.");
       return;
@@ -128,6 +140,28 @@ export default function CreateJobPage() {
           <Sparkles className="w-6 h-6" />
         </div>
       </div>
+
+      {/* Warning banner on mobile if API is still localhost */}
+      {isMobileLocalhost && (
+        <div className="p-3.5 rounded-2xl bg-amber-50 dark:bg-amber-950/40 border border-amber-300 dark:border-amber-700/50 flex items-center justify-between gap-3 text-xs text-amber-900 dark:text-amber-200 animate-in fade-in">
+          <div className="flex items-center gap-2.5">
+            <AlertTriangle className="w-5 h-5 text-amber-600 dark:text-amber-400 flex-shrink-0" />
+            <div>
+              <p className="font-bold">Chưa cấu hình địa chỉ máy chủ API</p>
+              <p className="text-[11px] opacity-90 mt-0.5">
+                Điện thoại cần kết nối tới IP máy tính (VD: http://192.168.1.x:8000).
+              </p>
+            </div>
+          </div>
+          <Link
+            href="/settings"
+            className="btn-primary py-1.5 px-3 text-xs whitespace-nowrap flex-shrink-0 flex items-center gap-1"
+          >
+            <SettingsIcon className="w-3.5 h-3.5" />
+            <span>Cài đặt</span>
+          </Link>
+        </div>
+      )}
 
       {/* 2. Card 01 · Nguồn video */}
       <UploadCard

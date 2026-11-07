@@ -49,12 +49,23 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const showToast = useCallback((message: string, type: ToastType = "info") => {
-    const id = `${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
-    setToasts((prev) => [...prev.slice(-3), { id, message, type }]);
+    if (!message || !message.trim()) return;
+    const cleanMsg = message.trim();
 
+    setToasts((prev) => {
+      // DEDUPLICATION: If exact same message is already visible, do not stack duplicate toast
+      if (prev.some((t) => t.message === cleanMsg)) {
+        return prev;
+      }
+      // LIMIT: Keep only the latest 1 toast on mobile to prevent filling the screen
+      const id = `${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+      return [{ id, message: cleanMsg, type }];
+    });
+
+    // Auto dismiss after 3.2 seconds
     setTimeout(() => {
-      setToasts((prev) => prev.filter((t) => t.id !== id));
-    }, 4000);
+      setToasts((prev) => prev.filter((t) => t.message !== cleanMsg));
+    }, 3200);
   }, []);
 
   useEffect(() => {
@@ -67,12 +78,12 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
   return (
     <ToastContext.Provider value={{ toasts, showToast, removeToast }}>
       {children}
-      {/* Toast Floating Container */}
-      <div className="fixed top-4 left-0 right-0 z-50 flex flex-col items-center gap-2 px-4 pointer-events-none max-w-[480px] mx-auto">
+      {/* Toast Floating Container - Maximum 1 clean card */}
+      <div className="fixed top-3 left-0 right-0 z-50 flex flex-col items-center px-4 pointer-events-none max-w-[480px] mx-auto">
         {toasts.map((t) => (
           <div
             key={t.id}
-            className={`pointer-events-auto flex items-center gap-3 w-full py-3 px-4 rounded-2xl shadow-lg border transition-all animate-in fade-in slide-in-from-top-3 duration-200 ${
+            className={`pointer-events-auto flex items-center gap-2.5 w-full py-2.5 px-3.5 rounded-2xl shadow-lg border transition-all animate-in fade-in slide-in-from-top-2 duration-150 ${
               t.type === "error"
                 ? "bg-[#F6DADA] dark:bg-[#3E1E1C] border-[#F2938C] text-[#B3261E] dark:text-[#F2938C]"
                 : t.type === "success"
@@ -80,17 +91,17 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
                 : "bg-[#FBF8F1] dark:bg-[#17241F] border-[#DDD8CC] dark:border-[#24362E] text-[#1B1B18] dark:text-[#F5F5F0]"
             }`}
           >
-            {t.type === "error" && <AlertCircle className="w-5 h-5 flex-shrink-0" />}
-            {t.type === "success" && <CheckCircle2 className="w-5 h-5 flex-shrink-0" />}
-            {t.type === "info" && <Info className="w-5 h-5 flex-shrink-0" />}
+            {t.type === "error" && <AlertCircle className="w-4 h-4 flex-shrink-0" />}
+            {t.type === "success" && <CheckCircle2 className="w-4 h-4 flex-shrink-0" />}
+            {t.type === "info" && <Info className="w-4 h-4 flex-shrink-0" />}
 
-            <p className="flex-1 text-xs font-medium leading-relaxed break-words">{t.message}</p>
+            <p className="flex-1 text-xs font-semibold leading-snug break-words">{t.message}</p>
 
             <button
               onClick={() => removeToast(t.id)}
               className="p-1 rounded-full hover:bg-black/5 dark:hover:bg-white/10 text-current opacity-70 hover:opacity-100 transition-opacity"
             >
-              <X className="w-4 h-4" />
+              <X className="w-3.5 h-3.5" />
             </button>
           </div>
         ))}

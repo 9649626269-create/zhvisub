@@ -1,23 +1,36 @@
 "use client";
 
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { Sparkles, CheckCircle2, User, Loader2 } from "lucide-react";
+import Link from "next/link";
+import { Sparkles, CheckCircle2, User, Loader2, Settings as SettingsIcon } from "lucide-react";
 import { useAuth } from "../lib/auth";
+import { isCapacitorApp, isLocalhostUrl, getApiBaseUrl } from "../lib/api";
 import { toast } from "../lib/toast";
 
 export default function LoginScreen() {
   const { loginWithGoogle, loginAsGuest } = useAuth();
   const [loadingGoogle, setLoadingGoogle] = useState(false);
+  const [isMobileApp, setIsMobileApp] = useState(false);
   const router = useRouter();
 
+  useEffect(() => {
+    setIsMobileApp(isCapacitorApp());
+  }, []);
+
   const handleGoogle = async () => {
+    const base = getApiBaseUrl();
+    if (isCapacitorApp() && isLocalhostUrl(base)) {
+      toast.info("Đăng nhập Google yêu cầu cấu hình IP máy chủ máy tính trong Cài đặt hoặc dùng Chế độ khách.");
+      return;
+    }
+
     setLoadingGoogle(true);
     try {
       await loginWithGoogle();
     } catch (err: any) {
       setLoadingGoogle(false);
-      toast.error(err.message || "Lỗi khởi tạo đăng nhập Google.");
+      toast.error(err.message || "Không thể kết nối dịch vụ Google.");
     }
   };
 
@@ -28,12 +41,12 @@ export default function LoginScreen() {
   };
 
   return (
-    <div className="min-h-[75vh] flex items-center justify-center px-2 py-6">
-      <div className="w-full app-card p-6 space-y-6 shadow-sm relative overflow-hidden">
+    <div className="min-h-[75vh] flex items-center justify-center px-2 py-4">
+      <div className="w-full app-card p-6 space-y-5 shadow-sm relative overflow-hidden">
         {/* Brand Icon & Heading */}
-        <div className="text-center space-y-2">
-          <div className="w-14 h-14 rounded-2xl bg-[#0F8A6F] flex items-center justify-center text-white mx-auto shadow-md shadow-[#0F8A6F]/20">
-            <Sparkles className="w-7 h-7 flex-shrink-0" />
+        <div className="text-center space-y-1.5">
+          <div className="w-13 h-13 rounded-2xl bg-[#0F8A6F] flex items-center justify-center text-white mx-auto shadow-md shadow-[#0F8A6F]/20 p-3">
+            <Sparkles className="w-6 h-6 flex-shrink-0" />
           </div>
           <h1 className="text-xl font-bold font-condensed tracking-tight text-[var(--text-primary)]">
             ZhViSub AI Video Sub & Dub
@@ -44,7 +57,7 @@ export default function LoginScreen() {
         </div>
 
         {/* Feature Highlights: Icon + text inline with gap */}
-        <div className="space-y-2.5 p-3.5 rounded-2xl bg-[var(--bg-app)] border border-[var(--border-app)]">
+        <div className="space-y-2 p-3 rounded-2xl bg-[var(--bg-app)] border border-[var(--border-app)]">
           {[
             "Tự động nhận diện phụ đề cứng bằng PaddleOCR",
             "Dịch thuật ngữ cảnh tự nhiên bằng Gemini & OpenAI",
@@ -58,18 +71,17 @@ export default function LoginScreen() {
         </div>
 
         {/* Login Actions */}
-        <div className="space-y-3">
+        <div className="space-y-2.5">
           {/* Continue with Google */}
           <button
             type="button"
             onClick={handleGoogle}
             disabled={loadingGoogle}
-            className="w-full py-3 px-4 rounded-full bg-white dark:bg-[#24362E] hover:bg-slate-50 dark:hover:bg-[#2E453B] text-slate-800 dark:text-slate-100 font-semibold text-xs flex items-center justify-center gap-2.5 shadow-sm border border-[var(--border-app)] transition-all active:scale-[0.99] disabled:opacity-75"
+            className="w-full py-2.5 px-4 rounded-full bg-white dark:bg-[#24362E] hover:bg-slate-50 dark:hover:bg-[#2E453B] text-slate-800 dark:text-slate-100 font-semibold text-xs flex items-center justify-center gap-2.5 shadow-sm border border-[var(--border-app)] transition-all active:scale-[0.99] disabled:opacity-75"
           >
             {loadingGoogle ? (
               <Loader2 className="w-4 h-4 animate-spin flex-shrink-0 text-[#0F8A6F]" />
             ) : (
-              /* Google G Logo - strictly max 20px */
               <svg className="w-4 h-4 max-w-[20px] max-h-[20px] flex-shrink-0" viewBox="0 0 24 24">
                 <path
                   fill="#4285F4"
@@ -93,7 +105,7 @@ export default function LoginScreen() {
           </button>
 
           {/* Divider */}
-          <div className="flex items-center gap-3 my-1 text-[var(--text-secondary)] text-[11px]">
+          <div className="flex items-center gap-3 my-0.5 text-[var(--text-secondary)] text-[11px]">
             <div className="flex-1 h-px bg-[var(--border-app)]" />
             <span>hoặc</span>
             <div className="flex-1 h-px bg-[var(--border-app)]" />
@@ -103,11 +115,22 @@ export default function LoginScreen() {
           <button
             type="button"
             onClick={handleGuest}
-            className="btn-secondary w-full py-3 text-xs"
+            className="btn-primary w-full py-2.5 text-xs shadow-sm"
           >
-            <User className="w-4 h-4 text-[#0F8A6F] flex-shrink-0" />
+            <User className="w-4 h-4 flex-shrink-0" />
             <span>Dùng không cần đăng nhập (Khách)</span>
           </button>
+        </div>
+
+        {/* Link to Settings */}
+        <div className="pt-1 text-center">
+          <Link
+            href="/settings"
+            className="inline-flex items-center gap-1.5 text-xs font-semibold text-[#0F8A6F] hover:underline"
+          >
+            <SettingsIcon className="w-3.5 h-3.5" />
+            <span>Cài đặt IP máy chủ & API Key</span>
+          </Link>
         </div>
 
         {/* Footer Note */}
