@@ -9,7 +9,8 @@ from typing import Optional
 
 from app.celery_app import celery_app
 from app.config import settings
-from app.db.models import BlurRegionModel, Job, SegmentModel
+from app.db.models import BlurRegionModel, Job, SegmentModel, UserModel
+from app.crypto import decrypt_text
 from app.db.session import SessionLocal
 from app.errors import AppError, ErrorCode
 from app.pipeline.audio import probe_video
@@ -56,6 +57,20 @@ def process_video_job(self, job_id: str):
 
         # Build pipeline options from job options
         opts_dict = job.options or {}
+        effective_key = opts_dict.get("api_key")
+        user_id = opts_dict.get("user_id")
+        if not effective_key and user_id:
+            try:
+                from app.api.auth import get_google_user_access_token_sync
+                u = db.query(UserModel).filter(UserModel.id == user_id).first()
+                if u:
+                    if u.api_key_enc:
+                        effective_key = decrypt_text(u.api_key_enc)
+                    elif u.google_refresh_token_enc:
+                        effective_key = get_google_user_access_token_sync(u)
+            except Exception as e:
+                logger.warning("Không thể lấy API key từ người dùng %s: %s", user_id, e)
+
         options = PipelineOptions(
             blur=opts_dict.get("blur", True),
             blur_strength=opts_dict.get("blur_strength", 30),
@@ -68,7 +83,7 @@ def process_video_job(self, job_id: str):
             dub_rate=opts_dict.get("dub_rate", "+0%"),
             orig_audio=opts_dict.get("orig_audio", "duck"),
             translate_engine=opts_dict.get("translate_engine", "gemini"),
-            api_key=opts_dict.get("api_key", None),
+            api_key=effective_key,
             api_base_url=opts_dict.get("api_base_url", None),
             llm_model=opts_dict.get("llm_model", None),
         )

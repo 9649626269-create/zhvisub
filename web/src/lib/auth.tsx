@@ -7,6 +7,9 @@ import {
   getAuthToken,
   setAuthToken,
   getGoogleAuthUrl,
+  fetchGoogleConfig,
+  loginGoogleNative,
+  isCapacitorApp,
   getGuestApiKey,
   getGuestProvider,
   setGuestApiKey,
@@ -83,6 +86,52 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   const loginWithGoogle = async (redirectUri?: string) => {
+    if (isCapacitorApp()) {
+      // 1. Fetch Google Client ID & scopes from backend configuration
+      const config = await fetchGoogleConfig();
+      if (!config.client_id) {
+        throw new Error(
+          "Chưa cấu hình GOOGLE_CLIENT_ID trên server (hãy kiểm tra biến môi trường trong file .env)."
+        );
+      }
+
+      // 2. Initialize native SocialLogin plugin with webClientId and offline mode
+      const { SocialLogin } = await import("@capgo/capacitor-social-login");
+      await SocialLogin.initialize({
+        google: {
+          webClientId: config.client_id,
+          mode: "offline",
+        },
+      });
+
+      // 3. Show native bottom-sheet Google Account picker
+      const res = await SocialLogin.login({
+        provider: "google",
+        options: {
+          scopes: config.scopes,
+          style: "bottom",
+        },
+      });
+
+      const serverAuthCode = (res.result as any)?.serverAuthCode;
+      const idToken = (res.result as any)?.idToken;
+
+      if (!serverAuthCode && !idToken) {
+        throw new Error("Không nhận được mã xác thực từ Google Sign-In.");
+      }
+
+      // 4. Exchange code at backend and store JWT
+      await loginGoogleNative({
+        server_auth_code: serverAuthCode,
+        id_token: idToken,
+      });
+
+      // 5. Update user state
+      await refreshUser();
+      return;
+    }
+
+    // Fallback: Web browser redirect flow
     const url = await getGoogleAuthUrl(redirectUri);
     window.location.href = url;
   };
@@ -95,6 +144,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const logout = () => {
+    if (isCapacitorApp()) {
+      import("@capgo/capacitor-social-login")
+        .then(({ SocialLogin }) => {
+          SocialLogin.logout({ provider: "google" }).catch(() => {});
+        })
+        .catch(() => {});
+    }
     setAuthToken(null);
     setUser(null);
     setIsGuest(true);
@@ -107,6 +163,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const disconnectGoogle = async () => {
+    if (isCapacitorApp()) {
+      try {
+        const { SocialLogin } = await import("@capgo/capacitor-social-login");
+        await SocialLogin.logout({ provider: "google" }).catch(() => {});
+      } catch {}
+    }
     await disconnectGoogleAccount();
     await refreshUser();
   };

@@ -51,3 +51,19 @@ def test_api_key_test_empty():
     assert res.status_code == 200
     data = res.json()
     assert data["valid"] is False
+
+
+def test_google_config_endpoint():
+    res = client.get("/auth/google/config")
+    assert res.status_code == 200
+    data = res.json()
+    assert "client_id" in data
+    assert "scopes" in data
+    assert "https://www.googleapis.com/auth/generative-language" in data["scopes"]
+
+
+def test_google_native_auth_missing_credentials():
+    res = client.post("/auth/google/native", json={})
+    assert res.status_code in (400, 500)
+    data = res.json()
+    assert "detail" in data

@@ -53,14 +53,21 @@ async def verify_provider_key(provider: str, key: str, base_url: Optional[str] =
     try:
         async with httpx.AsyncClient(timeout=10.0) as client:
             if provider == "gemini":
-                # Check Gemini models endpoint
-                url = f"https://generativelanguage.googleapis.com/v1beta/models?key={key}"
-                res = await client.get(url)
-                if res.status_code == 200:
-                    return True, "Khoá Gemini API hợp lệ và hoạt động tốt!"
+                # Check Gemini models endpoint (OAuth Bearer token or API Key)
+                if key.startswith("ya29."):
+                    url = "https://generativelanguage.googleapis.com/v1beta/models"
+                    res = await client.get(url, headers={"Authorization": f"Bearer {key}"})
                 else:
-                    err_msg = res.json().get("error", {}).get("message", res.text)
-                    return False, f"Khoá Gemini không hợp lệ: {err_msg}"
+                    url = f"https://generativelanguage.googleapis.com/v1beta/models?key={key}"
+                    res = await client.get(url)
+                if res.status_code == 200:
+                    return True, "Kết nối Gemini API hợp lệ và hoạt động tốt!"
+                else:
+                    try:
+                        err_msg = res.json().get("error", {}).get("message", res.text)
+                    except Exception:
+                        err_msg = res.text
+                    return False, f"Kết nối Gemini không hợp lệ: {err_msg}"
 
             elif provider == "openai":
                 # Check OpenAI models endpoint
@@ -178,10 +185,15 @@ async def test_api_key(
     target_base_url = req.base_url
     target_provider = req.provider
 
-    if not target_key and user and user.api_key_enc:
-        target_key = decrypt_text(user.api_key_enc)
-        target_base_url = user.api_base_url
-        target_provider = user.api_provider or target_provider
+    if not target_key and user:
+        if user.api_key_enc:
+            target_key = decrypt_text(user.api_key_enc)
+            target_base_url = user.api_base_url
+            target_provider = user.api_provider or target_provider
+        elif user.google_refresh_token_enc:
+            from app.api.auth import get_google_user_access_token
+            target_key = await get_google_user_access_token(user)
+            target_provider = "gemini"
 
     if not target_key:
         return ApiKeyTestResponse(

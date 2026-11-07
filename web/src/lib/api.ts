@@ -373,6 +373,33 @@ export function getFramePreviewUrl(jobId: string, timestamp: number = 0): string
 
 // === Auth & Google API Methods ===
 
+export async function fetchGoogleConfig(): Promise<{ client_id: string; scopes: string[] }> {
+  const res = await apiFetch("/auth/google/config");
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Không thể lấy cấu hình Google OAuth từ máy chủ.");
+  }
+  return res.json();
+}
+
+export async function loginGoogleNative(payload: {
+  server_auth_code?: string;
+  id_token?: string;
+}): Promise<{ access_token: string; user: UserProfile }> {
+  const res = await apiFetch("/auth/google/native", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(payload),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.detail || "Đăng nhập Google trực tiếp thất bại.");
+  }
+  const data = await res.json();
+  setAuthToken(data.access_token);
+  return data;
+}
+
 export async function getGoogleAuthUrl(redirectUri?: string): Promise<string> {
   const query = redirectUri ? `?redirect_uri=${encodeURIComponent(redirectUri)}` : "";
   const res = await apiFetch(`/auth/google/url${query}`);

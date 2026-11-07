@@ -20,7 +20,7 @@ from fastapi import (
 from fastapi.responses import FileResponse, Response
 from sqlalchemy.orm import Session
 
-from app.api.auth import get_current_user_optional
+from app.api.auth import get_current_user_optional, get_google_user_access_token_sync
 from app.api.schemas import (
     JobCreateResponse,
     JobListResponse,
@@ -93,6 +93,14 @@ def create_job(
     job_id = str(uuid.uuid4())
     job_dir = settings.get_job_dir(job_id)
 
+    # Determine effective API key (direct form field -> user stored key -> Google OAuth token)
+    effective_api_key = user_api_key
+    if not effective_api_key and user:
+        if user.api_key_enc:
+            effective_api_key = decrypt_text(user.api_key_enc)
+        elif user.google_refresh_token_enc:
+            effective_api_key = get_google_user_access_token_sync(user)
+
     options_dict = {
         "blur": blur,
         "blur_strength": blur_strength,
@@ -105,8 +113,9 @@ def create_job(
         "dub_rate": dub_rate,
         "orig_audio": orig_audio,
         "translate_engine": translate_engine,
-        "api_key": user_api_key or (decrypt_text(user.api_key_enc) if user and user.api_key_enc else None),
+        "api_key": effective_api_key,
         "api_base_url": user.api_base_url if user else None,
+        "user_id": user.id if user else None,
     }
 
     original_filename = ""

@@ -70,9 +70,18 @@ export default function ApiKeySettings() {
     setIsGoogleLoading(true);
     try {
       await loginWithGoogle();
+      if (isCapacitorApp()) {
+        toast.success("Đăng nhập Google thành công!");
+      }
     } catch (err: any) {
+      const msg = err.message || "";
+      if (msg.toLowerCase().includes("cancel") || msg.includes("16:")) {
+        toast.info("Đã huỷ đăng nhập Google.");
+      } else {
+        toast.error(msg || "Không thể kết nối dịch vụ Google.");
+      }
+    } finally {
       setIsGoogleLoading(false);
-      toast.error(err.message || "Không thể kết nối dịch vụ Google.");
     }
   };
 

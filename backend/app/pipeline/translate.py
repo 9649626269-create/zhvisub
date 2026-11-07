@@ -47,10 +47,13 @@ def _translate_batch_llm(
     target_base = base_url or settings.llm_base_url
     target_model = model or settings.llm_model
 
-    # If it's a Google Gemini API key and no explicit custom base_url was set
-    if target_key.startswith("AIza") and not base_url:
+    # If it's a Google Gemini API key or OAuth access token and no explicit custom base_url was set
+    if (target_key.startswith("AIza") or target_key.startswith("ya29.")) and not base_url:
         target_base = "https://generativelanguage.googleapis.com/v1beta/openai/"
-        target_model = model or "gemini-1.5-flash"
+        if not model or model == settings.llm_model or "gemini" not in model.lower():
+            target_model = "gemini-1.5-flash"
+        else:
+            target_model = model
     
     client = OpenAI(
         base_url=target_base,
