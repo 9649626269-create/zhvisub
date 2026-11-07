@@ -1,0 +1,21 @@
+# NVIDIA GPU overlay for docker-compose.yml
+services:
+  worker:
+    environment:
+      - WHISPER_COMPUTE=float16
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+
+  worker-ocr:
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]

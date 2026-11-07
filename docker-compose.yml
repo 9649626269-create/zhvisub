@@ -1,0 +1,122 @@
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: zhvisub-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.api
+    container_name: zhvisub-api
+    restart: unless-stopped
+    env_file:
+      - backend/.env.example
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - DATABASE_URL=sqlite:////app/data/db/zhvisub.db
+      - DATA_DIR=/app/data
+      - MODELS_DIR=/app/models
+    ports:
+      - "8000:8000"
+    volumes:
+      - data_volume:/app/data
+      - models_volume:/app/models
+      - db_volume:/app/data/db
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.worker
+    container_name: zhvisub-worker
+    restart: unless-stopped
+    env_file:
+      - backend/.env.example
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - DATABASE_URL=sqlite:////app/data/db/zhvisub.db
+      - DATA_DIR=/app/data
+      - MODELS_DIR=/app/models
+    volumes:
+      - data_volume:/app/data
+      - models_volume:/app/models
+      - db_volume:/app/data/db
+    depends_on:
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_started
+
+  worker-ocr:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.worker-ocr
+    container_name: zhvisub-worker-ocr
+    restart: unless-stopped
+    env_file:
+      - backend/.env.example
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - DATABASE_URL=sqlite:////app/data/db/zhvisub.db
+      - DATA_DIR=/app/data
+      - MODELS_DIR=/app/models
+    volumes:
+      - data_volume:/app/data
+      - models_volume:/app/models
+      - db_volume:/app/data/db
+    depends_on:
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_started
+
+  beat:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.api
+    container_name: zhvisub-beat
+    restart: unless-stopped
+    command: ["celery", "-A", "app.celery_app", "beat", "--loglevel=info"]
+    env_file:
+      - backend/.env.example
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - DATABASE_URL=sqlite:////app/data/db/zhvisub.db
+      - DATA_DIR=/app/data
+    volumes:
+      - data_volume:/app/data
+      - db_volume:/app/data/db
+    depends_on:
+      redis:
+        condition: service_healthy
+      api:
+        condition: service_started
+
+  web:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.web
+    container_name: zhvisub-web
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api
+
+volumes:
+  redis_data:
+  data_volume:
+  models_volume:
+  db_volume:

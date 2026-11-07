@@ -1,0 +1,40 @@
+# Node / Next.js
+web/node_modules/
+web/.next/
+web/out/
+
+# Android / Gradle
+web/android/.gradle/
+web/android/build/
+web/android/app/build/
+web/android/capacitor-cordova-android-plugins/build/
+web/android/*.jks
+*.keystore
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.coverage
+htmlcov/
+*.egg-info/
+dist/
+build/
+
+# Local Data, Databases & Models
+backend/data/
+backend/models/
+backend/.env
+data/
+models/
+*.db
+*.db-wal
+*.db-shm
+
+# OS & IDE
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
