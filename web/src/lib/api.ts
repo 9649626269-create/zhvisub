@@ -1,7 +1,7 @@
 /**
  * ZhViSub API Client
  * Supports configurable API server URL (stored in localStorage) for LAN / APK use,
- * JWT authentication, and AI Key management.
+ * JWT authentication, AI Key management, and unified apiFetch with 10s timeout & friendly error messages.
  */
 
 export interface VoiceItem {
@@ -75,10 +75,23 @@ export interface ApiKeyStatus {
 
 export const DEFAULT_API_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:8000";
 
+export function isCapacitorApp(): boolean {
+  if (typeof window === "undefined") return false;
+  const isCap = !!(window as any).Capacitor;
+  const isCapScheme = window.location.protocol === "capacitor:" ||
+    (window.location.protocol === "https:" && (window.location.hostname === "localhost" || (window as any).isAndroid));
+  return isCap || isCapScheme;
+}
+
+export function isLocalhostUrl(url: string): boolean {
+  if (!url) return false;
+  return url.includes("localhost") || url.includes("127.0.0.1");
+}
+
 export function getApiBaseUrl(): string {
   if (typeof window !== "undefined") {
     const saved = localStorage.getItem("zhvisub_api_url");
-    if (saved) return saved.replace(/\/+$/, "");
+    if (saved && saved.trim()) return saved.trim().replace(/\/+$/, "");
   }
   return DEFAULT_API_URL.replace(/\/+$/, "");
 }
@@ -144,16 +157,67 @@ function getAuthHeaders(): Record<string, string> {
   return {};
 }
 
-export async function fetchVoices(): Promise<VoiceItem[]> {
+/**
+ * Unified network fetch wrapper with 10s AbortController timeout & Vietnamese error classification
+ */
+export async function apiFetch(
+  endpoint: string,
+  options: RequestInit = {},
+  timeoutMs: number = 10000
+): Promise<Response> {
   const base = getApiBaseUrl();
-  const res = await fetch(`${base}/voices`);
+  const url = endpoint.startsWith("http://") || endpoint.startsWith("https://")
+    ? endpoint
+    : `${base}${endpoint.startsWith("/") ? "" : "/"}${endpoint}`;
+
+  if (isCapacitorApp() && isLocalhostUrl(base)) {
+    throw new Error("Điện thoại không truy cập được localhost. Hãy nhập IP máy tính, ví dụ http://192.168.1.10:8000");
+  }
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+
+  try {
+    const res = await fetch(url, {
+      ...options,
+      signal: controller.signal,
+    });
+    clearTimeout(timer);
+
+    if (!res.ok) {
+      if (res.status === 401 || res.status === 403) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.detail || errJson.message || "Key không hợp lệ hoặc hết quyền truy cập (401/403)");
+      }
+      if (res.status >= 500) {
+        const errJson = await res.json().catch(() => ({}));
+        throw new Error(errJson.detail || errJson.message || `Lỗi máy chủ (HTTP ${res.status})`);
+      }
+    }
+    return res;
+  } catch (err: any) {
+    clearTimeout(timer);
+    if (err.name === "AbortError") {
+      throw new Error("Hết thời gian chờ phản hồi từ máy chủ (quá 10s)");
+    }
+    if (err.message && (err.message.includes("Failed to fetch") || err.message.includes("NetworkError"))) {
+      if (typeof window !== "undefined" && window.location.protocol === "https:" && url.startsWith("http:")) {
+        throw new Error("Máy chủ từ chối (Trình duyệt chặn kết nối HTTP không an toàn từ HTTPS)");
+      }
+      throw new Error("Không kết nối được máy chủ (kiểm tra địa chỉ & Wi-Fi)");
+    }
+    throw err;
+  }
+}
+
+export async function fetchVoices(): Promise<VoiceItem[]> {
+  const res = await apiFetch("/voices");
   if (!res.ok) throw new Error("Không thể tải danh sách giọng đọc.");
   return res.json();
 }
 
 export async function listJobs(page: number = 1, pageSize: number = 20): Promise<JobListResponse> {
-  const base = getApiBaseUrl();
-  const res = await fetch(`${base}/jobs?page=${page}&page_size=${pageSize}`, {
+  const res = await apiFetch(`/jobs?page=${page}&page_size=${pageSize}`, {
     headers: { ...getAuthHeaders() },
   });
   if (!res.ok) throw new Error("Không thể tải danh sách công việc.");
@@ -161,8 +225,7 @@ export async function listJobs(page: number = 1, pageSize: number = 20): Promise
 }
 
 export async function getJob(id: string): Promise<JobStatus> {
-  const base = getApiBaseUrl();
-  const res = await fetch(`${base}/jobs/${id}`, {
+  const res = await apiFetch(`/jobs/${id}`, {
     headers: { ...getAuthHeaders() },
   });
   if (!res.ok) {
@@ -173,8 +236,7 @@ export async function getJob(id: string): Promise<JobStatus> {
 }
 
 export async function cancelJob(id: string): Promise<void> {
-  const base = getApiBaseUrl();
-  const res = await fetch(`${base}/jobs/${id}/cancel`, {
+  const res = await apiFetch(`/jobs/${id}/cancel`, {
     method: "POST",
     headers: { ...getAuthHeaders() },
   });
@@ -182,8 +244,7 @@ export async function cancelJob(id: string): Promise<void> {
 }
 
 export async function deleteJob(id: string): Promise<void> {
-  const base = getApiBaseUrl();
-  const res = await fetch(`${base}/jobs/${id}`, {
+  const res = await apiFetch(`/jobs/${id}`, {
     method: "DELETE",
     headers: { ...getAuthHeaders() },
   });
@@ -191,8 +252,7 @@ export async function deleteJob(id: string): Promise<void> {
 }
 
 export async function getSegments(id: string): Promise<Segment[]> {
-  const base = getApiBaseUrl();
-  const res = await fetch(`${base}/jobs/${id}/segments`, {
+  const res = await apiFetch(`/jobs/${id}/segments`, {
     headers: { ...getAuthHeaders() },
   });
   if (!res.ok) throw new Error("Không thể tải danh sách phụ đề.");
@@ -200,8 +260,7 @@ export async function getSegments(id: string): Promise<Segment[]> {
 }
 
 export async function updateSegments(id: string, segments: Segment[]): Promise<void> {
-  const base = getApiBaseUrl();
-  const res = await fetch(`${base}/jobs/${id}/segments`, {
+  const res = await apiFetch(`/jobs/${id}/segments`, {
     method: "PUT",
     headers: {
       "Content-Type": "application/json",
@@ -228,8 +287,7 @@ export async function rerenderJob(
     blur_regions?: BlurRegionItem[];
   }
 ): Promise<void> {
-  const base = getApiBaseUrl();
-  const res = await fetch(`${base}/jobs/${id}/render`, {
+  const res = await apiFetch(`/jobs/${id}/render`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -249,8 +307,15 @@ export function createJobWithProgress(
 ): Promise<{ id: string; status: string; message: string }> {
   return new Promise((resolve, reject) => {
     const base = getApiBaseUrl();
+
+    if (isCapacitorApp() && isLocalhostUrl(base)) {
+      reject(new Error("Điện thoại không truy cập được localhost. Hãy nhập IP máy tính, ví dụ http://192.168.1.10:8000"));
+      return;
+    }
+
     const xhr = new XMLHttpRequest();
     xhr.open("POST", `${base}/jobs`);
+    xhr.timeout = 180000; // 3 mins for large uploads
 
     const token = getAuthToken();
     if (token) {
@@ -272,15 +337,19 @@ export function createJobWithProgress(
         if (xhr.status >= 200 && xhr.status < 300) {
           resolve(data);
         } else {
-          reject(new Error(data.message || `Lỗi tải lên (HTTP ${xhr.status})`));
+          reject(new Error(data.message || `Lỗi máy chủ (HTTP ${xhr.status})`));
         }
       } catch (e) {
         reject(new Error(`Phản hồi máy chủ không hợp lệ (HTTP ${xhr.status})`));
       }
     };
 
+    xhr.ontimeout = () => {
+      reject(new Error("Hết thời gian tải video lên máy chủ (quá 3 phút)."));
+    };
+
     xhr.onerror = () => {
-      reject(new Error("Lỗi mạng khi tải video lên máy chủ. Kiểm tra kết nối API."));
+      reject(new Error("Không kết nối được máy chủ khi tải video (kiểm tra địa chỉ & Wi-Fi)"));
     };
 
     xhr.send(formData);
@@ -305,9 +374,8 @@ export function getFramePreviewUrl(jobId: string, timestamp: number = 0): string
 // === Auth & Google API Methods ===
 
 export async function getGoogleAuthUrl(redirectUri?: string): Promise<string> {
-  const base = getApiBaseUrl();
   const query = redirectUri ? `?redirect_uri=${encodeURIComponent(redirectUri)}` : "";
-  const res = await fetch(`${base}/auth/google/url${query}`);
+  const res = await apiFetch(`/auth/google/url${query}`);
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.detail || "Không thể lấy đường dẫn đăng nhập Google.");
@@ -317,8 +385,7 @@ export async function getGoogleAuthUrl(redirectUri?: string): Promise<string> {
 }
 
 export async function exchangeGoogleCode(code: string, redirectUri?: string): Promise<{ access_token: string; user: UserProfile }> {
-  const base = getApiBaseUrl();
-  const res = await fetch(`${base}/auth/google`, {
+  const res = await apiFetch("/auth/google", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ code, redirect_uri: redirectUri }),
@@ -336,20 +403,22 @@ export async function fetchUserProfile(): Promise<UserProfile | null> {
   const token = getAuthToken();
   if (!token) return null;
 
-  const base = getApiBaseUrl();
-  const res = await fetch(`${base}/auth/me`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-  if (!res.ok) {
-    setAuthToken(null);
+  try {
+    const res = await apiFetch("/auth/me", {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) {
+      setAuthToken(null);
+      return null;
+    }
+    return res.json();
+  } catch {
     return null;
   }
-  return res.json();
 }
 
 export async function disconnectGoogleAccount(): Promise<void> {
-  const base = getApiBaseUrl();
-  const res = await fetch(`${base}/auth/google/disconnect`, {
+  const res = await apiFetch("/auth/google/disconnect", {
     method: "POST",
     headers: { ...getAuthHeaders() },
   });
@@ -359,8 +428,7 @@ export async function disconnectGoogleAccount(): Promise<void> {
 // === AI API Key Settings Methods ===
 
 export async function fetchApiKeyStatus(): Promise<ApiKeyStatus> {
-  const base = getApiBaseUrl();
-  const res = await fetch(`${base}/settings/api-key`, {
+  const res = await apiFetch("/settings/api-key", {
     headers: { ...getAuthHeaders() },
   });
   if (!res.ok) throw new Error("Không thể tải trạng thái API key.");
@@ -368,8 +436,7 @@ export async function fetchApiKeyStatus(): Promise<ApiKeyStatus> {
 }
 
 export async function saveApiKey(provider: string, key: string, baseUrl?: string): Promise<ApiKeyStatus> {
-  const base = getApiBaseUrl();
-  const res = await fetch(`${base}/settings/api-key`, {
+  const res = await apiFetch("/settings/api-key", {
     method: "PUT",
     headers: {
       "Content-Type": "application/json",
@@ -385,8 +452,7 @@ export async function saveApiKey(provider: string, key: string, baseUrl?: string
 }
 
 export async function deleteApiKey(): Promise<void> {
-  const base = getApiBaseUrl();
-  const res = await fetch(`${base}/settings/api-key`, {
+  const res = await apiFetch("/settings/api-key", {
     method: "DELETE",
     headers: { ...getAuthHeaders() },
   });
@@ -394,8 +460,7 @@ export async function deleteApiKey(): Promise<void> {
 }
 
 export async function testApiKey(provider: string, key?: string, baseUrl?: string): Promise<{ valid: boolean; message: string }> {
-  const base = getApiBaseUrl();
-  const res = await fetch(`${base}/settings/api-key/test`, {
+  const res = await apiFetch("/settings/api-key/test", {
     method: "POST",
     headers: {
       "Content-Type": "application/json",

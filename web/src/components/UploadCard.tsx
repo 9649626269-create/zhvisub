@@ -1,7 +1,18 @@
 "use client";
 
 import React, { useState, useRef } from "react";
-import { UploadCloud, Link as LinkIcon, Film, Trash2, CheckCircle2, AlertCircle } from "lucide-react";
+import {
+  Link as LinkIcon,
+  UploadCloud,
+  FolderHeart,
+  Globe,
+  Clipboard,
+  X,
+  Film,
+  Trash2,
+  Check,
+} from "lucide-react";
+import { toast } from "../lib/toast";
 
 interface UploadCardProps {
   onVideoSelected: (file: File | null, url: string) => void;
@@ -14,7 +25,9 @@ export default function UploadCard({
   selectedFile,
   videoUrl,
 }: UploadCardProps) {
-  const [tab, setTab] = useState<"file" | "url">(videoUrl ? "url" : "file");
+  const [activeTab, setActiveTab] = useState<"url" | "file" | "library">(
+    videoUrl ? "url" : selectedFile ? "file" : "url"
+  );
   const [urlInput, setUrlInput] = useState(videoUrl);
   const [isDragging, setIsDragging] = useState(false);
   const [videoDuration, setVideoDuration] = useState<number | null>(null);
@@ -35,13 +48,12 @@ export default function UploadCard({
 
   const handleFile = (file: File) => {
     if (file.size > 2 * 1024 * 1024 * 1024) {
-      alert("Dung lượng video vượt quá giới hạn 2GB!");
+      toast.error("Dung lượng video vượt quá giới hạn 2GB!");
       return;
     }
 
     onVideoSelected(file, "");
 
-    // Generate quick thumbnail & duration from local video
     const videoObjUrl = URL.createObjectURL(file);
     const tempVideo = document.createElement("video");
     tempVideo.preload = "metadata";
@@ -67,15 +79,6 @@ export default function UploadCard({
     };
   };
 
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault();
-    setIsDragging(true);
-  };
-
-  const handleDragLeave = () => {
-    setIsDragging(false);
-  };
-
   const handleDrop = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDragging(false);
@@ -92,159 +95,207 @@ export default function UploadCard({
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
-  const handleUrlSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    const trimmed = urlInput.trim();
-    if (!trimmed) return;
-    if (!trimmed.startsWith("http://") && !trimmed.startsWith("https://")) {
-      alert("Đường link phải bắt đầu bằng http:// hoặc https://");
-      return;
+  const handleUrlChange = (val: string) => {
+    setUrlInput(val);
+    const trimmed = val.trim();
+    if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+      onVideoSelected(null, trimmed);
+    } else {
+      onVideoSelected(null, "");
     }
-    onVideoSelected(null, trimmed);
+  };
+
+  const handlePasteClipboard = async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (text) {
+        handleUrlChange(text);
+        toast.success("Đã dán link từ bộ nhớ tạm!");
+      }
+    } catch {
+      toast.info("Không thể đọc bộ nhớ tạm. Hãy dán trực tiếp.");
+    }
   };
 
   return (
-    <div className="app-card p-5 transition-all">
-      {/* Header & Tabs */}
-      <div className="flex items-center justify-between pb-4 border-b border-[#1F2A44] dark:border-[#1F2A44] border-slate-200">
-        <div className="flex items-center gap-2.5">
-          <div className="w-8 h-8 rounded-xl bg-purple-500/10 flex items-center justify-center text-[#7C5CFF]">
-            <Film className="w-4 h-4" />
-          </div>
-          <div>
-            <h2 className="text-base font-semibold text-slate-100 dark:text-slate-100 text-slate-800">
-              Nguồn video
-            </h2>
-            <p className="text-xs text-slate-400">Chọn video tiếng Trung cần dịch</p>
-          </div>
-        </div>
-
-        {/* Tab switch */}
-        {!selectedFile && !videoUrl && (
-          <div className="flex p-1 rounded-xl bg-[#0B1020] dark:bg-[#0B1020] bg-slate-100 border border-[#1F2A44] dark:border-[#1F2A44] border-slate-200 text-xs">
-            <button
-              type="button"
-              onClick={() => setTab("file")}
-              className={`px-3 py-1.5 rounded-lg font-medium transition-all ${
-                tab === "file"
-                  ? "bg-gradient-to-r from-[#7C5CFF] to-[#22D3EE] text-white shadow-sm"
-                  : "text-slate-400 hover:text-slate-200"
-              }`}
-            >
-              Tải file
-            </button>
-            <button
-              type="button"
-              onClick={() => setTab("url")}
-              className={`px-3 py-1.5 rounded-lg font-medium transition-all ${
-                tab === "url"
-                  ? "bg-gradient-to-r from-[#7C5CFF] to-[#22D3EE] text-white shadow-sm"
-                  : "text-slate-400 hover:text-slate-200"
-              }`}
-            >
-              Dán link
-            </button>
-          </div>
-        )}
+    <div className="app-card space-y-4">
+      {/* Card Header Label */}
+      <div className="flex items-center justify-between">
+        <span className="text-xs font-bold text-[#0F8A6F] tracking-wide uppercase">
+          01 · Nguồn video
+        </span>
       </div>
 
-      <div className="mt-4">
-        {/* Selected File / URL Preview */}
-        {selectedFile || videoUrl ? (
-          <div className="p-4 rounded-2xl bg-[#0B1020]/70 dark:bg-[#0B1020]/70 bg-slate-100/70 border border-[#1F2A44] dark:border-[#1F2A44] border-slate-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
-            <div className="flex items-center gap-3.5 min-w-0">
-              {previewThumbnail ? (
-                <img
-                  src={previewThumbnail}
-                  alt="Thumbnail"
-                  className="w-20 h-14 object-cover rounded-xl border border-[#1F2A44] shadow-sm flex-shrink-0"
-                />
+      {/* Segmented Button (Pill Style) */}
+      <div className="segmented-container">
+        <button
+          type="button"
+          onClick={() => {
+            setActiveTab("url");
+            if (urlInput) onVideoSelected(null, urlInput);
+          }}
+          className={`segmented-item ${activeTab === "url" ? "active" : ""}`}
+        >
+          {activeTab === "url" && <Check className="w-4 h-4" />}
+          <span>Nhập link</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            setActiveTab("file");
+            if (selectedFile) onVideoSelected(selectedFile, "");
+          }}
+          className={`segmented-item ${activeTab === "file" ? "active" : ""}`}
+        >
+          {activeTab === "file" && <Check className="w-4 h-4" />}
+          <span>Chọn file</span>
+        </button>
+
+        <button
+          type="button"
+          onClick={() => {
+            setActiveTab("library");
+            toast.info("Tính năng Thư viện đang được phát triển.");
+          }}
+          className={`segmented-item ${activeTab === "library" ? "active" : ""}`}
+        >
+          {activeTab === "library" && <Check className="w-4 h-4" />}
+          <span>Thư viện</span>
+        </button>
+      </div>
+
+      {/* Tab: Nhập link */}
+      {activeTab === "url" && (
+        <div className="space-y-2">
+          <div className="relative flex items-center">
+            {/* Left Globe icon */}
+            <div className="absolute left-3.5 text-[var(--text-secondary)] pointer-events-none">
+              <Globe className="w-5 h-5" />
+            </div>
+
+            {/* Outlined Input with Floating Label */}
+            <input
+              type="url"
+              value={urlInput}
+              onChange={(e) => handleUrlChange(e.target.value)}
+              placeholder="Link YouTube, TikTok, Douyin, Facebook…"
+              className="app-input pl-11 pr-20 py-3 text-xs"
+            />
+
+            {/* Right Action Icons: Paste & Clear */}
+            <div className="absolute right-2 flex items-center gap-1">
+              {urlInput ? (
+                <button
+                  type="button"
+                  onClick={() => handleUrlChange("")}
+                  className="p-1.5 rounded-full text-[var(--text-secondary)] hover:text-[var(--text-primary)] hover:bg-black/5 dark:hover:bg-white/10"
+                >
+                  <X className="w-4 h-4" />
+                </button>
               ) : (
-                <div className="w-14 h-14 rounded-xl bg-purple-500/10 border border-purple-500/20 flex items-center justify-center text-[#7C5CFF] flex-shrink-0">
-                  <Film className="w-6 h-6" />
-                </div>
+                <button
+                  type="button"
+                  onClick={handlePasteClipboard}
+                  className="p-1.5 rounded-full text-[#0F8A6F] hover:bg-[#BFF3E4]/30"
+                  title="Dán từ clipboard"
+                >
+                  <Clipboard className="w-4 h-4" />
+                </button>
               )}
-              <div className="min-w-0">
-                <div className="flex items-center gap-1.5">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-400 flex-shrink-0" />
-                  <span className="text-sm font-semibold text-slate-100 dark:text-slate-100 text-slate-800 truncate block">
-                    {selectedFile ? selectedFile.name : videoUrl}
-                  </span>
-                </div>
-                <div className="flex items-center gap-3 mt-1 text-xs text-slate-400">
-                  {selectedFile && <span>{formatFileSize(selectedFile.size)}</span>}
-                  {videoDuration !== null && <span>Thời lượng: {formatDuration(videoDuration)}</span>}
-                  {videoUrl && <span className="text-[#22D3EE]">Link trực tiếp</span>}
+            </div>
+          </div>
+
+          <p className="text-[11px] text-[var(--text-secondary)] pl-1">
+            Có thể dán nguyên nội dung chia sẻ từ Douyin.
+          </p>
+        </div>
+      )}
+
+      {/* Tab: Chọn file */}
+      {activeTab === "file" && (
+        <div>
+          {selectedFile ? (
+            <div className="p-3 rounded-2xl bg-[var(--bg-app)] border border-[var(--border-app)] flex items-center justify-between gap-3">
+              <div className="flex items-center gap-3 min-w-0">
+                {previewThumbnail ? (
+                  <img
+                    src={previewThumbnail}
+                    alt="Video thumbnail"
+                    className="w-14 h-14 rounded-xl object-cover border border-[var(--border-app)] flex-shrink-0"
+                  />
+                ) : (
+                  <div className="w-14 h-14 rounded-xl bg-[#0F8A6F]/10 text-[#0F8A6F] flex items-center justify-center flex-shrink-0">
+                    <Film className="w-6 h-6" />
+                  </div>
+                )}
+                <div className="min-w-0">
+                  <p className="text-xs font-semibold text-[var(--text-primary)] truncate">
+                    {selectedFile.name}
+                  </p>
+                  <p className="text-[11px] text-[var(--text-secondary)] mt-0.5">
+                    {formatFileSize(selectedFile.size)}
+                    {videoDuration ? ` · ${formatDuration(videoDuration)}` : ""}
+                  </p>
                 </div>
               </div>
-            </div>
 
-            <button
-              type="button"
-              onClick={handleRemove}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium text-rose-400 hover:bg-rose-500/10 border border-transparent hover:border-rose-500/20 transition-all self-end sm:self-center"
-            >
-              <Trash2 className="w-4 h-4" />
-              <span>Xoá</span>
-            </button>
-          </div>
-        ) : tab === "file" ? (
-          /* Drag & Drop File Zone */
-          <div
-            onDragOver={handleDragOver}
-            onDragLeave={handleDragLeave}
-            onDrop={handleDrop}
-            onClick={() => fileInputRef.current?.click()}
-            className={`border-2 border-dashed rounded-2xl p-6 sm:p-8 text-center cursor-pointer transition-all ${
-              isDragging
-                ? "border-[#22D3EE] bg-[#7C5CFF]/10 scale-[0.99]"
-                : "border-[#1F2A44] dark:border-[#1F2A44] border-slate-300 hover:border-[#7C5CFF] bg-[#0B1020]/40 dark:bg-[#0B1020]/40 bg-slate-50/50 hover:bg-[#121A2F]/40"
-            }`}
-          >
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="video/mp4,video/quicktime,video/x-matroska,video/webm"
-              className="hidden"
-              onChange={(e) => {
-                if (e.target.files && e.target.files[0]) {
-                  handleFile(e.target.files[0]);
-                }
+              <button
+                type="button"
+                onClick={handleRemove}
+                className="p-2 rounded-full text-rose-500 hover:bg-rose-500/10 flex-shrink-0"
+                title="Xoá video"
+              >
+                <Trash2 className="w-4 h-4" />
+              </button>
+            </div>
+          ) : (
+            <div
+              onDragOver={(e) => {
+                e.preventDefault();
+                setIsDragging(true);
               }}
-            />
-            <div className="w-12 h-12 rounded-2xl bg-gradient-to-tr from-[#7C5CFF]/20 to-[#22D3EE]/20 border border-[#7C5CFF]/30 flex items-center justify-center mx-auto mb-3 text-[#22D3EE]">
-              <UploadCloud className="w-6 h-6" />
-            </div>
-            <p className="text-sm font-medium text-slate-200 dark:text-slate-200 text-slate-700">
-              Kéo thả video vào đây hoặc <span className="text-[#22D3EE] font-semibold underline decoration-dotted">chọn file</span>
-            </p>
-            <p className="text-xs text-slate-400 mt-1.5">
-              MP4, MOV, MKV, WebM · tối đa 2GB
-            </p>
-          </div>
-        ) : (
-          /* Link Input Form */
-          <form onSubmit={handleUrlSubmit} className="space-y-3">
-            <div className="relative">
-              <input
-                type="url"
-                value={urlInput}
-                onChange={(e) => setUrlInput(e.target.value)}
-                placeholder="https://example.com/video.mp4"
-                className="w-full px-4 py-3 pl-10 rounded-2xl bg-[#0B1020] dark:bg-[#0B1020] bg-slate-100 border border-[#1F2A44] dark:border-[#1F2A44] border-slate-200 text-sm text-slate-100 dark:text-slate-100 text-slate-900 focus:outline-none focus:border-[#7C5CFF] transition-colors"
-              />
-              <LinkIcon className="w-4 h-4 text-slate-400 absolute left-3.5 top-3.5" />
-            </div>
-            <button
-              type="submit"
-              disabled={!urlInput.trim()}
-              className="w-full gradient-btn py-2.5 text-xs font-semibold"
+              onDragLeave={() => setIsDragging(false)}
+              onDrop={handleDrop}
+              onClick={() => fileInputRef.current?.click()}
+              className={`p-6 border-2 border-dashed rounded-2xl text-center cursor-pointer transition-all ${
+                isDragging
+                  ? "border-[#0F8A6F] bg-[#BFF3E4]/20"
+                  : "border-[var(--border-app)] hover:border-[#0F8A6F]/60 bg-[var(--bg-app)]/50"
+              }`}
             >
-              Sử dụng link này
-            </button>
-          </form>
-        )}
-      </div>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="video/mp4,video/quicktime,video/x-matroska"
+                onChange={(e) => {
+                  if (e.target.files && e.target.files[0]) {
+                    handleFile(e.target.files[0]);
+                  }
+                }}
+                className="hidden"
+              />
+              <div className="w-11 h-11 rounded-full bg-[#BFF3E4]/60 text-[#0F8A6F] flex items-center justify-center mx-auto mb-2">
+                <UploadCloud className="w-6 h-6" />
+              </div>
+              <p className="text-xs font-semibold text-[var(--text-primary)]">
+                Kéo thả hoặc nhấn để chọn video
+              </p>
+              <p className="text-[11px] text-[var(--text-secondary)] mt-1">
+                Hỗ trợ MP4, MOV, MKV (Tối đa 2GB)
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Tab: Thư viện */}
+      {activeTab === "library" && (
+        <div className="p-6 text-center text-xs text-[var(--text-secondary)]">
+          <FolderHeart className="w-8 h-8 mx-auto mb-2 opacity-50" />
+          <p>Chưa có video nào trong thư viện tạm.</p>
+        </div>
+      )}
     </div>
   );
 }

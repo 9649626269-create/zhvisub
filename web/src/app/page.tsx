@@ -13,11 +13,12 @@ import {
   VoiceItem,
   getGuestApiKey,
 } from "../lib/api";
-import { Sparkles, Loader2, ArrowRight } from "lucide-react";
+import { toast } from "../lib/toast";
+import { Sparkles, Loader2, ArrowRight, CloudCheck, Play } from "lucide-react";
 
 export default function CreateJobPage() {
   const router = useRouter();
-  const { hasAiConnection, user } = useAuth();
+  const { hasAiConnection } = useAuth();
 
   // Video source states
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
@@ -41,9 +42,8 @@ export default function CreateJobPage() {
   // Submitting states
   const [isSubmitting, setIsSubmitting] = useState<boolean>(false);
   const [uploadPercent, setUploadPercent] = useState<number>(0);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  // Load voices list on mount
+  // Load voices on mount
   useEffect(() => {
     fetchVoices()
       .then((data) => {
@@ -58,19 +58,25 @@ export default function CreateJobPage() {
   const handleVideoSelected = (file: File | null, url: string) => {
     setSelectedFile(file);
     setVideoUrl(url);
-    setErrorMsg(null);
   };
 
-  // Validation
   const hasVideo = Boolean(selectedFile || videoUrl.trim());
   const isKeyValid = hasAiConnection || translateEngine === "fallback";
   const canSubmit = hasVideo && isKeyValid && !isSubmitting;
 
   const handleSubmit = async () => {
-    if (!canSubmit) return;
+    if (!hasVideo) {
+      toast.error("Vui lòng chọn file video hoặc dán đường link video.");
+      return;
+    }
+    if (!isKeyValid) {
+      toast.error("Vui lòng cài đặt API key hoặc chọn chế độ Miễn phí dự phòng.");
+      return;
+    }
+    if (isSubmitting) return;
+
     setIsSubmitting(true);
     setUploadPercent(0);
-    setErrorMsg(null);
 
     const formData = new FormData();
     if (selectedFile) {
@@ -88,7 +94,6 @@ export default function CreateJobPage() {
     formData.append("orig_audio", origAudio);
     formData.append("translate_engine", translateEngine);
 
-    // Pass guest key if in guest mode
     const guestKey = getGuestApiKey();
     if (guestKey) {
       formData.append("user_api_key", guestKey);
@@ -98,116 +103,108 @@ export default function CreateJobPage() {
       const res = await createJobWithProgress(formData, (percent) => {
         setUploadPercent(percent);
       });
+      toast.success("Tạo công việc thành công! Đang chuyển hướng...");
       router.push(`/job?id=${res.id}`);
     } catch (err: any) {
-      setErrorMsg(err.message || "Không thể tạo công việc dịch video.");
+      toast.error(err.message || "Tạo công việc thất bại.");
       setIsSubmitting(false);
+      setUploadPercent(0);
     }
   };
 
   return (
-    <div className="space-y-6 pb-20">
-      {/* Page Title */}
-      <div>
-        <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-100 dark:text-slate-100 text-slate-900">
-          Tạo bản dịch video mới
-        </h1>
-        <p className="text-xs sm:text-sm text-slate-400 mt-1">
-          Tự động nhận diện chữ cứng, xóa phụ đề gốc và chèn phụ đề / lồng tiếng Việt
-        </p>
-      </div>
-
-      {errorMsg && (
-        <div className="p-4 rounded-2xl bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs flex items-center justify-between">
-          <span>{errorMsg}</span>
-          <button onClick={() => setErrorMsg(null)} className="font-bold underline ml-2">Đóng</button>
+    <div className="space-y-4 pb-6">
+      {/* 1. Hero Banner */}
+      <div className="hero-banner flex items-center justify-between">
+        <div className="space-y-1">
+          <h2 className="text-xl font-bold font-condensed tracking-tight text-white leading-tight">
+            Dịch, lồng tiếng, render.
+          </h2>
+          <p className="text-xs text-white/90">
+            Mọi tác vụ AI chạy trên server Linly / GPU.
+          </p>
         </div>
-      )}
-
-      {/* 2-Column Responsive Layout on Desktop */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 items-start">
-        {/* Left Column: Source Video + Translation Engine */}
-        <div className="space-y-5">
-          <UploadCard
-            selectedFile={selectedFile}
-            videoUrl={videoUrl}
-            onVideoSelected={handleVideoSelected}
-          />
-
-          <TranslationCard
-            engine={translateEngine}
-            setEngine={setTranslateEngine}
-          />
-        </div>
-
-        {/* Right Column: Subtitle Blur & Placement + AI Dubbing */}
-        <div className="space-y-5">
-          <ProcessingOptions
-            blur={blur}
-            setBlur={setBlur}
-            blurStrength={blurStrength}
-            setBlurStrength={setBlurStrength}
-            position={position}
-            setPosition={setPosition}
-          />
-
-          <DubbingOptions
-            dub={dub}
-            setDub={setDub}
-            voice={voice}
-            setVoice={setVoice}
-            dubRate={dubRate}
-            setDubRate={setDubRate}
-            origAudio={origAudio}
-            setOrigAudio={setOrigAudio}
-            voicesList={voicesList}
-          />
+        <div className="w-12 h-12 rounded-2xl bg-white/15 flex items-center justify-center text-white flex-shrink-0">
+          <Sparkles className="w-6 h-6" />
         </div>
       </div>
 
-      {/* Sticky Bottom Action Bar */}
-      <div className="fixed bottom-16 lg:bottom-0 left-0 lg:left-64 right-0 z-30 p-4 bg-[#0B1020]/90 dark:bg-[#0B1020]/90 bg-white/90 backdrop-blur-md border-t border-[#1F2A44] dark:border-[#1F2A44] border-slate-200">
-        <div className="max-w-6xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-3">
-          {/* Progress or Status note */}
-          <div className="text-xs text-slate-400 text-center sm:text-left">
-            {isSubmitting ? (
-              <div className="flex items-center gap-2 text-[#22D3EE] font-medium">
-                <Loader2 className="w-4 h-4 animate-spin" />
-                <span>Đang tải video lên máy chủ ({uploadPercent}%)...</span>
-              </div>
-            ) : !hasVideo ? (
-              <span>Vui lòng chọn file video hoặc dán link video để tiếp tục</span>
-            ) : !isKeyValid ? (
-              <span className="text-amber-400">Thiếu API key cho mô hình dịch này</span>
-            ) : (
-              <span className="text-emerald-400 flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-                Đã sẵn sàng xử lý video
+      {/* 2. Card 01 · Nguồn video */}
+      <UploadCard
+        onVideoSelected={handleVideoSelected}
+        selectedFile={selectedFile}
+        videoUrl={videoUrl}
+      />
+
+      {/* 3. Card 02 · Cấu hình nhanh (Xử lý phụ đề & làm mờ) */}
+      <ProcessingOptions
+        blur={blur}
+        setBlur={setBlur}
+        blurStrength={blurStrength}
+        setBlurStrength={setBlurStrength}
+        position={position}
+        setPosition={setPosition}
+      />
+
+      {/* 4. Lồng tiếng AI */}
+      <DubbingOptions
+        dub={dub}
+        setDub={setDub}
+        voice={voice}
+        setVoice={setVoice}
+        dubRate={dubRate}
+        setDubRate={setDubRate}
+        origAudio={origAudio}
+        setOrigAudio={setOrigAudio}
+        voicesList={voicesList}
+      />
+
+      {/* 5. Mô hình dịch thuật */}
+      <TranslationCard
+        engine={translateEngine}
+        setEngine={setTranslateEngine}
+      />
+
+      {/* 6. Nút Bắt đầu xử lý (Primary Action) */}
+      <div className="pt-2">
+        <button
+          type="button"
+          disabled={!canSubmit}
+          onClick={handleSubmit}
+          className="btn-primary w-full py-3.5 text-sm shadow-md"
+        >
+          {isSubmitting ? (
+            <>
+              <Loader2 className="w-5 h-5 animate-spin" />
+              <span>
+                {uploadPercent > 0 && uploadPercent < 100
+                  ? `Đang tải video lên (${uploadPercent}%)...`
+                  : "Đang khởi tạo job..."}
               </span>
-            )}
-          </div>
+            </>
+          ) : (
+            <>
+              <Play className="w-5 h-5 fill-current" />
+              <span>Bắt đầu xử lý</span>
+            </>
+          )}
+        </button>
 
-          {/* Action Button */}
-          <button
-            type="button"
-            disabled={!canSubmit}
-            onClick={handleSubmit}
-            className="w-full sm:w-auto gradient-btn px-8 py-3.5 text-sm font-semibold flex items-center justify-center gap-2.5 shadow-xl shadow-[#7C5CFF]/20"
-          >
-            {isSubmitting ? (
-              <>
-                <Loader2 className="w-4 h-4 animate-spin" />
-                <span>Đang tải lên {uploadPercent}%</span>
-              </>
-            ) : (
-              <>
-                <Sparkles className="w-4 h-4" />
-                <span>Bắt đầu xử lý</span>
-                <ArrowRight className="w-4 h-4" />
-              </>
-            )}
-          </button>
-        </div>
+        {/* Upload progress bar when uploading */}
+        {isSubmitting && uploadPercent > 0 && (
+          <div className="mt-3 space-y-1">
+            <div className="w-full bg-[#DDD8CC] dark:bg-[#24362E] h-2 rounded-full overflow-hidden">
+              <div
+                className="bg-[#0F8A6F] h-full transition-all duration-200 rounded-full"
+                style={{ width: `${uploadPercent}%` }}
+              />
+            </div>
+            <div className="flex justify-between text-[11px] text-[var(--text-secondary)]">
+              <span>Đang tải lên</span>
+              <span className="font-bold">{uploadPercent}%</span>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

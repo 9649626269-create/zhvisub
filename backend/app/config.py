@@ -41,7 +41,7 @@ class Settings(BaseSettings):
     max_concurrent_jobs: int = 3
 
     # Server
-    cors_origins: str = "http://localhost:3000,capacitor://localhost"
+    cors_origins: str = "http://localhost:3000,http://localhost:8000,http://localhost,https://localhost,capacitor://localhost,http://127.0.0.1:3000,http://127.0.0.1:8000,http://127.0.0.1"
     database_url: str = "sqlite:///./data/db/zhvisub.db"
     redis_url: str = "redis://localhost:6379/0"
 

@@ -26,7 +26,9 @@ import {
   getGuestApiKey,
   getGuestProvider,
   getGuestBaseUrl,
+  isCapacitorApp,
 } from "../lib/api";
+import { toast } from "../lib/toast";
 
 export default function ApiKeySettings() {
   const { user, isGuest, loginWithGoogle, disconnectGoogle, updateGuestKey } = useAuth();
@@ -42,7 +44,7 @@ export default function ApiKeySettings() {
   const [isTesting, setIsTesting] = useState<boolean>(false);
   const [testResult, setTestResult] = useState<{ valid: boolean; message: string } | null>(null);
   const [isSaving, setIsSaving] = useState<boolean>(false);
-  const [saveSuccess, setSaveSuccess] = useState<boolean>(false);
+  const [isGoogleLoading, setIsGoogleLoading] = useState<boolean>(false);
 
   // Load existing status
   useEffect(() => {
@@ -55,15 +57,24 @@ export default function ApiKeySettings() {
         })
         .catch(() => {});
     } else {
-      // Guest mode: load from localStorage
       const guestKey = getGuestApiKey();
       const guestProv = getGuestProvider();
       const guestBase = getGuestBaseUrl();
       setApiKeyInput(guestKey);
-      setProvider(guestProv);
+      setProvider(guestProv || "gemini");
       setBaseUrlInput(guestBase);
     }
   }, [user, isGuest]);
+
+  const handleGoogleLogin = async () => {
+    setIsGoogleLoading(true);
+    try {
+      await loginWithGoogle();
+    } catch (err: any) {
+      setIsGoogleLoading(false);
+      toast.error(err.message || "Không thể kết nối dịch vụ Google.");
+    }
+  };
 
   const handleTestKey = async () => {
     setIsTesting(true);
@@ -72,11 +83,15 @@ export default function ApiKeySettings() {
       const keyToTest = apiKeyInput.trim();
       const res = await testApiKey(provider, keyToTest || undefined, baseUrlInput.trim() || undefined);
       setTestResult(res);
+      if (res.valid) {
+        toast.success(res.message || "Khoá API hợp lệ!");
+      } else {
+        toast.error(res.message || "Khoá API không hợp lệ.");
+      }
     } catch (err: any) {
-      setTestResult({
-        valid: false,
-        message: err.message || "Lỗi kết nối khi kiểm tra API key.",
-      });
+      const msg = err.message || "Lỗi kết nối khi kiểm tra API key.";
+      setTestResult({ valid: false, message: msg });
+      toast.error(msg);
     } finally {
       setIsTesting(false);
     }
@@ -85,145 +100,121 @@ export default function ApiKeySettings() {
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
     setIsSaving(true);
-    setSaveSuccess(false);
 
     try {
       if (!isGuest && user) {
-        // Save encrypted on server
         if (!apiKeyInput.trim()) {
-          alert("Vui lòng nhập khoá API.");
+          toast.error("Vui lòng nhập khoá API.");
           setIsSaving(false);
           return;
         }
         const updated = await saveApiKey(provider, apiKeyInput.trim(), baseUrlInput.trim() || undefined);
         setServerKeyStatus(updated);
         setApiKeyInput("");
+        toast.success("Đã lưu mã hoá trên máy chủ!");
       } else {
-        // Save in guest mode (localStorage)
         updateGuestKey(apiKeyInput.trim(), provider, baseUrlInput.trim());
+        toast.success("Đã lưu khoá API trên thiết bị (Guest Mode)!");
       }
-      setSaveSuccess(true);
-      setTimeout(() => setSaveSuccess(false), 3000);
     } catch (err: any) {
-      alert(err.message || "Không thể lưu khoá API.");
+      toast.error(err.message || "Không thể lưu khoá API.");
     } finally {
       setIsSaving(false);
     }
   };
 
   const handleDeleteServerKey = async () => {
-    if (!confirm("Bạn có chắc chắn muốn xoá khoá API đã lưu?")) return;
     try {
       await deleteApiKey();
       setServerKeyStatus(null);
       setApiKeyInput("");
+      toast.success("Đã xoá khoá API lưu trên máy chủ.");
     } catch (err: any) {
-      alert(err.message || "Không thể xoá key.");
+      toast.error(err.message || "Không thể xoá key.");
     }
   };
 
   return (
-    <div className="space-y-6">
-      {/* Method A: Google Account Connect (generative-language) */}
-      <div className="app-card p-5">
-        <div className="flex items-center justify-between pb-4 border-b border-[#1F2A44] dark:border-[#1F2A44] border-slate-200">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-xl bg-purple-500/10 flex items-center justify-center text-[#7C5CFF]">
-              <Sparkles className="w-4 h-4" />
-            </div>
-            <div>
-              <h3 className="text-base font-semibold text-slate-100 dark:text-slate-100 text-slate-800">
-                Cách 1: Đăng nhập Google (Tự động kết nối Gemini)
-              </h3>
-              <p className="text-xs text-slate-400">
-                Sử dụng token generative-language của chính bạn, lưu mã hoá phía server
-              </p>
-            </div>
+    <div className="space-y-4">
+      {/* 2. Card: Cách 1: Đăng nhập Google (Tự động kết nối Gemini) */}
+      <div className="app-card space-y-3">
+        <div className="flex items-start justify-between gap-2">
+          <div>
+            <h3 className="text-sm font-bold text-[var(--text-primary)]">
+              Cách 1: Đăng nhập Google (Tự động kết nối Gemini)
+            </h3>
+            <p className="text-xs text-[var(--text-secondary)] mt-0.5 leading-relaxed">
+              Sử dụng token generative-language của chính bạn, lưu mã hoá an toàn.
+            </p>
           </div>
 
           {user?.has_google_token && (
-            <span className="flex items-center gap-1 text-xs text-emerald-400 font-semibold bg-emerald-500/10 border border-emerald-500/20 px-2.5 py-1 rounded-xl">
+            <span className="chip chip-mint flex-shrink-0">
               <CheckCircle2 className="w-3.5 h-3.5" /> Đã kết nối
             </span>
           )}
         </div>
 
-        <div className="mt-4">
-          {user && !isGuest ? (
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-3.5 rounded-2xl bg-[#0B1020]/60 border border-[#1F2A44]">
-              <div className="flex items-center gap-3">
-                {user.picture ? (
-                  <img src={user.picture} alt="Google Avatar" className="w-9 h-9 rounded-xl object-cover" />
-                ) : (
-                  <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-[#7C5CFF] to-[#22D3EE] text-white flex items-center justify-center font-bold text-xs">
-                    {user.name[0]}
-                  </div>
-                )}
-                <div>
-                  <div className="text-xs font-semibold text-slate-200">{user.name}</div>
-                  <div className="text-[11px] text-slate-400">{user.email}</div>
-                </div>
-              </div>
-
-              {user.has_google_token ? (
-                <button
-                  type="button"
-                  onClick={disconnectGoogle}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-medium text-rose-400 hover:bg-rose-500/10 border border-rose-500/20 transition-all self-end sm:self-center"
-                >
-                  <Unlink className="w-3.5 h-3.5" />
-                  <span>Ngắt kết nối</span>
-                </button>
+        {user && !isGuest && user.has_google_token ? (
+          <div className="flex items-center justify-between p-3 rounded-2xl bg-[var(--bg-app)] border border-[var(--border-app)]">
+            <div className="flex items-center gap-2.5 min-w-0">
+              {user.picture ? (
+                <img src={user.picture} alt="Avatar" className="w-8 h-8 rounded-full object-cover" />
               ) : (
-                <button
-                  type="button"
-                  onClick={() => loginWithGoogle()}
-                  className="gradient-btn px-4 py-2 text-xs font-semibold self-end sm:self-center"
-                >
-                  Cấp quyền Gemini
-                </button>
+                <div className="w-8 h-8 rounded-full bg-[#0F8A6F] text-white flex items-center justify-center font-bold text-xs">
+                  {user.name ? user.name[0] : "G"}
+                </div>
               )}
+              <div className="min-w-0">
+                <p className="text-xs font-bold truncate">{user.name}</p>
+                <p className="text-[11px] text-[var(--text-secondary)] truncate">{user.email}</p>
+              </div>
             </div>
-          ) : (
-            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 p-4 rounded-2xl bg-[#0B1020]/40 border border-[#1F2A44]">
-              <p className="text-xs text-slate-400 max-w-md">
-                Đăng nhập tài khoản Google để sử dụng hạn ngạch Gemini miễn phí hàng ngày mà không cần tự tạo API key thủ công.
-              </p>
-              <button
-                type="button"
-                onClick={() => loginWithGoogle()}
-                className="gradient-btn px-4 py-2.5 text-xs font-semibold flex items-center gap-2 whitespace-nowrap"
-              >
-                <Sparkles className="w-4 h-4" />
-                <span>Tiếp tục với Google</span>
-              </button>
-            </div>
-          )}
-        </div>
+
+            <button
+              type="button"
+              onClick={disconnectGoogle}
+              className="btn-secondary py-1.5 px-3 text-xs text-rose-500 border-rose-300 hover:border-rose-500"
+            >
+              <Unlink className="w-3.5 h-3.5" />
+              <span>Ngắt kết nối</span>
+            </button>
+          </div>
+        ) : (
+          <button
+            type="button"
+            disabled={isGoogleLoading}
+            onClick={handleGoogleLogin}
+            className="w-full py-3 px-4 rounded-full bg-gradient-to-r from-[#0F8A6F] to-[#7C5CFF] hover:opacity-95 text-white font-semibold text-xs flex items-center justify-center gap-2 shadow-sm transition-all disabled:opacity-75"
+          >
+            {isGoogleLoading ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <Sparkles className="w-4 h-4" />
+            )}
+            <span>{isGoogleLoading ? "Đang kết nối..." : "Tiếp tục với Google"}</span>
+          </button>
+        )}
       </div>
 
-      {/* Method B: Manual API Key Input */}
-      <div className="app-card p-5">
-        <div className="flex items-center justify-between pb-4 border-b border-[#1F2A44] dark:border-[#1F2A44] border-slate-200">
-          <div className="flex items-center gap-2.5">
-            <div className="w-8 h-8 rounded-xl bg-cyan-500/10 flex items-center justify-center text-[#22D3EE]">
-              <KeyRound className="w-4 h-4" />
-            </div>
-            <div>
-              <h3 className="text-base font-semibold text-slate-100 dark:text-slate-100 text-slate-800">
-                Cách 2: Tự nhập API Key (Gemini / OpenAI / Anthropic)
-              </h3>
-              <p className="text-xs text-slate-400">
-                {isGuest ? "Lưu an toàn trên thiết bị (Guest Mode)" : "Mã hoá AES 256-bit trên máy chủ"}
-              </p>
-            </div>
+      {/* 3. Card: Cách 2: Tự nhập API Key */}
+      <div className="app-card space-y-4">
+        {/* Header with Link button */}
+        <div className="flex items-start justify-between gap-2">
+          <div>
+            <h3 className="text-sm font-bold text-[var(--text-primary)]">
+              Cách 2: Tự nhập API Key
+            </h3>
+            <p className="text-xs text-[var(--text-secondary)] mt-0.5">
+              Lưu an toàn trên thiết bị (Guest Mode)
+            </p>
           </div>
 
           <a
             href="https://aistudio.google.com/apikey"
             target="_blank"
             rel="noopener noreferrer"
-            className="flex items-center gap-1 text-xs font-semibold text-[#22D3EE] hover:underline"
+            className="flex items-center gap-1 text-xs font-bold text-[#0F8A6F] hover:underline flex-shrink-0"
           >
             <span>Lấy key Google</span>
             <ExternalLink className="w-3.5 h-3.5" />
@@ -232,79 +223,77 @@ export default function ApiKeySettings() {
 
         {/* Existing Saved Key on Server */}
         {!isGuest && serverKeyStatus?.has_key && (
-          <div className="mt-4 p-3.5 rounded-2xl bg-[#0B1020]/60 border border-emerald-500/20 flex items-center justify-between">
-            <div className="flex items-center gap-2.5">
-              <ShieldCheck className="w-4 h-4 text-emerald-400" />
-              <div>
-                <span className="text-xs font-semibold text-slate-200">
-                  Khoá đã lưu: <span className="font-mono text-[#22D3EE]">{serverKeyStatus.masked_key}</span>
-                </span>
-                <span className="text-[10px] text-slate-400 ml-2 uppercase font-medium">
-                  ({serverKeyStatus.provider})
-                </span>
-              </div>
+          <div className="p-3 rounded-2xl bg-[var(--bg-app)] border border-[#0F8A6F]/30 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <ShieldCheck className="w-4 h-4 text-[#0F8A6F]" />
+              <span className="text-xs">
+                Khoá đã lưu: <strong className="font-mono text-[#0F8A6F]">{serverKeyStatus.masked_key}</strong>
+              </span>
             </div>
             <button
               onClick={handleDeleteServerKey}
-              className="text-xs text-rose-400 hover:bg-rose-500/10 p-1.5 rounded-lg transition-colors"
-              title="Xoá key đã lưu"
+              className="p-1 rounded-full text-rose-500 hover:bg-rose-500/10"
+              title="Xoá key"
             >
               <Trash2 className="w-4 h-4" />
             </button>
           </div>
         )}
 
-        <form onSubmit={handleSave} className="mt-4 space-y-4">
-          {/* Provider Select */}
+        <form onSubmit={handleSave} className="space-y-3.5">
+          {/* Segmented Provider Selection (4 equal buttons, wrapping cleanly) */}
           <div>
-            <label className="block text-xs font-medium text-slate-300 dark:text-slate-300 text-slate-700 mb-1.5">
+            <label className="block text-xs font-semibold text-[var(--text-primary)] mb-1.5">
               Nhà cung cấp AI
             </label>
-            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
               {[
                 { id: "gemini", label: "Google Gemini" },
                 { id: "openai", label: "OpenAI" },
                 { id: "anthropic", label: "Anthropic" },
                 { id: "custom", label: "Tuỳ chỉnh URL" },
-              ].map((p) => (
-                <button
-                  key={p.id}
-                  type="button"
-                  onClick={() => setProvider(p.id)}
-                  className={`py-2 px-3 rounded-xl text-xs font-medium border text-center transition-all ${
-                    provider === p.id
-                      ? "border-[#7C5CFF] bg-[#7C5CFF]/15 text-white shadow-sm font-semibold"
-                      : "border-[#1F2A44] dark:border-[#1F2A44] border-slate-200 bg-[#0B1020]/40 text-slate-400 hover:text-slate-200"
-                  }`}
-                >
-                  {p.label}
-                </button>
-              ))}
+              ].map((p) => {
+                const isActive = provider === p.id;
+                return (
+                  <button
+                    key={p.id}
+                    type="button"
+                    onClick={() => setProvider(p.id)}
+                    className={`py-2 px-2 rounded-xl text-xs font-semibold text-center transition-all ${
+                      isActive
+                        ? "bg-[#BFF3E4] dark:bg-[#1C3B32] text-[#0F8A6F] dark:text-[#A6EDD9] border border-[#0F8A6F]"
+                        : "bg-[var(--bg-app)] text-[var(--text-secondary)] border border-[var(--border-app)] hover:border-[#0F8A6F]/40"
+                    }`}
+                  >
+                    {p.label}
+                  </button>
+                );
+              })}
             </div>
           </div>
 
           {/* Custom Base URL (if custom) */}
           {provider === "custom" && (
             <div>
-              <label className="block text-xs font-medium text-slate-300 dark:text-slate-300 text-slate-700 mb-1.5">
-                Base URL tương thích OpenAI (Ví dụ: http://localhost:11434/v1)
+              <label className="block text-xs font-semibold text-[var(--text-primary)] mb-1.5">
+                Base URL tương thích OpenAI
               </label>
               <input
                 type="text"
                 value={baseUrlInput}
                 onChange={(e) => setBaseUrlInput(e.target.value)}
                 placeholder="http://localhost:11434/v1"
-                className="w-full px-4 py-2.5 rounded-xl bg-[#0B1020] dark:bg-[#0B1020] bg-slate-100 border border-[#1F2A44] dark:border-[#1F2A44] border-slate-200 text-xs text-slate-100 dark:text-slate-100 text-slate-900 focus:outline-none focus:border-[#7C5CFF]"
+                className="app-input py-2.5 text-xs font-mono"
               />
             </div>
           )}
 
-          {/* API Key Input with Show/Hide */}
+          {/* API Key Input with Outlined Style & Eye Toggle */}
           <div>
-            <label className="block text-xs font-medium text-slate-300 dark:text-slate-300 text-slate-700 mb-1.5">
+            <label className="block text-xs font-semibold text-[var(--text-primary)] mb-1.5">
               Khoá API Key ({provider.toUpperCase()})
             </label>
-            <div className="relative">
+            <div className="relative flex items-center">
               <input
                 type={showKey ? "text" : "password"}
                 value={apiKeyInput}
@@ -316,28 +305,28 @@ export default function ApiKeySettings() {
                     ? "sk-..."
                     : "Nhập khoá API..."
                 }
-                className="w-full px-4 py-2.5 pr-10 rounded-xl bg-[#0B1020] dark:bg-[#0B1020] bg-slate-100 border border-[#1F2A44] dark:border-[#1F2A44] border-slate-200 text-xs font-mono text-slate-100 dark:text-slate-100 text-slate-900 focus:outline-none focus:border-[#7C5CFF]"
+                className="app-input py-2.5 pr-10 text-xs font-mono"
               />
               <button
                 type="button"
                 onClick={() => setShowKey(!showKey)}
-                className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-200"
+                className="absolute right-3 text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
               >
                 {showKey ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
               </button>
             </div>
-            <p className="text-[11px] text-slate-500 mt-1">
-              Bảo mật: Key không bao giờ xuất hiện trong log và chỉ hiển thị 4 ký tự cuối.
+            <p className="text-[11px] text-[var(--text-secondary)] mt-1 pl-1">
+              Key không bao giờ xuất hiện trong log và chỉ hiển thị 4 ký tự cuối.
             </p>
           </div>
 
-          {/* Test Result Message */}
+          {/* Test result status chip */}
           {testResult && (
             <div
-              className={`p-3 rounded-xl border text-xs flex items-center gap-2 ${
+              className={`p-2.5 rounded-2xl text-xs flex items-center gap-2 ${
                 testResult.valid
-                  ? "bg-emerald-500/10 border-emerald-500/30 text-emerald-400"
-                  : "bg-rose-500/10 border-rose-500/30 text-rose-400"
+                  ? "bg-[#D1F5EA] text-[#0B6B57]"
+                  : "bg-[#F6DADA] text-[#B3261E]"
               }`}
             >
               {testResult.valid ? (
@@ -345,36 +334,38 @@ export default function ApiKeySettings() {
               ) : (
                 <XCircle className="w-4 h-4 flex-shrink-0" />
               )}
-              <span>{testResult.message}</span>
+              <span className="leading-tight">{testResult.message}</span>
             </div>
           )}
 
-          {/* Buttons: Test & Save */}
-          <div className="flex items-center gap-3 pt-2">
+          {/* Two Equal Buttons Side-by-Side: NO OVERLAPPING */}
+          <div className="grid grid-cols-2 gap-3 pt-1">
             <button
               type="button"
               disabled={isTesting || (!apiKeyInput.trim() && !serverKeyStatus?.has_key)}
               onClick={handleTestKey}
-              className="px-4 py-2.5 rounded-xl border border-[#1F2A44] hover:border-[#7C5CFF] text-xs font-semibold text-slate-200 flex items-center gap-2 disabled:opacity-50 transition-colors"
+              className="btn-secondary w-full py-2.5 text-xs font-semibold"
             >
-              {isTesting ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Server className="w-3.5 h-3.5 text-[#22D3EE]" />}
+              {isTesting ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Server className="w-4 h-4" />
+              )}
               <span>Kiểm tra key</span>
             </button>
 
             <button
               type="submit"
               disabled={isSaving || !apiKeyInput.trim()}
-              className="gradient-btn px-5 py-2.5 text-xs font-semibold flex items-center gap-2"
+              className="btn-primary w-full py-2.5 text-xs font-semibold"
             >
-              {isSaving ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Save className="w-3.5 h-3.5" />}
-              <span>{isGuest ? "Lưu trên máy" : "Mã hoá & Lưu"}</span>
+              {isSaving ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Save className="w-4 h-4" />
+              )}
+              <span>Lưu trên máy</span>
             </button>
-
-            {saveSuccess && (
-              <span className="text-xs text-emerald-400 font-semibold flex items-center gap-1 animate-in fade-in">
-                <CheckCircle2 className="w-3.5 h-3.5" /> Đã lưu thành công!
-              </span>
-            )}
           </div>
         </form>
       </div>
