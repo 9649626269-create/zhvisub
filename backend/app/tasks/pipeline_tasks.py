@@ -67,6 +67,10 @@ def process_video_job(self, job_id: str):
             voice=opts_dict.get("voice", settings.tts_voice),
             dub_rate=opts_dict.get("dub_rate", "+0%"),
             orig_audio=opts_dict.get("orig_audio", "duck"),
+            translate_engine=opts_dict.get("translate_engine", "gemini"),
+            api_key=opts_dict.get("api_key", None),
+            api_base_url=opts_dict.get("api_base_url", None),
+            llm_model=opts_dict.get("llm_model", None),
         )
 
         def is_cancelled() -> bool:

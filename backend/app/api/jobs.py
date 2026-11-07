@@ -20,6 +20,7 @@ from fastapi import (
 from fastapi.responses import FileResponse, Response
 from sqlalchemy.orm import Session
 
+from app.api.auth import get_current_user_optional
 from app.api.schemas import (
     JobCreateResponse,
     JobListResponse,
@@ -31,7 +32,9 @@ from app.api.schemas import (
 from app.api.streaming import range_streaming_response
 from app.celery_app import celery_app
 from app.config import settings
+from app.crypto import decrypt_text
 from app.db import Job, SegmentModel, get_db
+from app.db.models import UserModel
 from app.errors import AppError, ErrorCode
 from app.pipeline.audio import extract_frame, probe_video
 from app.pipeline.ingest import download_video, save_upload_stream
@@ -58,6 +61,9 @@ def create_job(
     voice: str = Form(settings.tts_voice),
     dub_rate: str = Form("+0%"),
     orig_audio: str = Form("duck"),
+    translate_engine: str = Form("gemini"),
+    user_api_key: Optional[str] = Form(None),
+    user: Optional[UserModel] = Depends(get_current_user_optional),
     db: Session = Depends(get_db),
 ):
     """
@@ -98,6 +104,9 @@ def create_job(
         "voice": voice,
         "dub_rate": dub_rate,
         "orig_audio": orig_audio,
+        "translate_engine": translate_engine,
+        "api_key": user_api_key or (decrypt_text(user.api_key_enc) if user and user.api_key_enc else None),
+        "api_base_url": user.api_base_url if user else None,
     }
 
     original_filename = ""

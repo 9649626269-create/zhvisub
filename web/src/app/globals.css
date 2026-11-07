@@ -1,36 +1,88 @@
 @import "tailwindcss";
 
-:root {
-  --background: #0b0f19;
-  --foreground: #f8fafc;
-  --card: #151d30;
-  --border: #23314e;
-  --primary: #3b82f6;
-  --primary-hover: #2563eb;
+@layer base {
+  :root {
+    --bg-app: #f8fafc;
+    --card-app: #ffffff;
+    --border-app: #e2e8f0;
+    --text-primary: #0f172a;
+    --text-secondary: #64748b;
+    --accent-purple: #7c5cff;
+    --accent-cyan: #22d3ee;
+  }
+
+  .dark {
+    --bg-app: #0b1020;
+    --card-app: #121a2f;
+    --border-app: #1f2a44;
+    --text-primary: #f8fafc;
+    --text-secondary: #94a3b8;
+    --accent-purple: #7c5cff;
+    --accent-cyan: #22d3ee;
+  }
 }
 
 body {
-  background-color: var(--background);
-  color: var(--foreground);
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  background-color: var(--bg-app);
+  color: var(--text-primary);
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   margin: 0;
   padding: 0;
   min-height: 100vh;
   -webkit-font-smoothing: antialiased;
+  transition: background-color 0.25s ease, color 0.25s ease;
 }
 
-/* Custom scrollbars for subtitle list */
+/* Custom Scrollbars */
 ::-webkit-scrollbar {
   width: 6px;
   height: 6px;
 }
 ::-webkit-scrollbar-track {
-  background: #0f172a;
+  background: transparent;
 }
 ::-webkit-scrollbar-thumb {
   background: #334155;
-  border-radius: 3px;
+  border-radius: 9999px;
 }
 ::-webkit-scrollbar-thumb:hover {
   background: #475569;
+}
+
+/* Glass & Card styles */
+.app-card {
+  background-color: var(--card-app);
+  border: 1px solid var(--border-app);
+  border-radius: 16px;
+  box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.25), 0 8px 10px -6px rgba(0, 0, 0, 0.2);
+}
+
+.gradient-btn {
+  background: linear-gradient(135deg, #7c5cff 0%, #22d3ee 100%);
+  color: #ffffff;
+  font-weight: 600;
+  border-radius: 16px;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.gradient-btn:hover:not(:disabled) {
+  opacity: 0.95;
+  transform: translateY(-1px);
+  box-shadow: 0 8px 20px -4px rgba(124, 92, 255, 0.4);
+}
+
+.gradient-btn:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.gradient-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  filter: grayscale(40%);
+}
+
+.gradient-text {
+  background: linear-gradient(135deg, #7c5cff 0%, #22d3ee 100%);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
 }

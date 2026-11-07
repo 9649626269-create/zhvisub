@@ -45,6 +45,15 @@ class Settings(BaseSettings):
     database_url: str = "sqlite:///./data/db/zhvisub.db"
     redis_url: str = "redis://localhost:6379/0"
 
+    # Auth & API Key Security
+    google_client_id: str = ""
+    google_client_secret: str = ""
+    google_redirect_uri: str = "http://localhost:3000/auth/callback"
+    encryption_key: str = ""
+    jwt_secret: str = "zhvisub-super-secret-jwt-key-change-me"
+    jwt_algorithm: str = "HS256"
+    jwt_expire_days: int = 30
+
     @property
     def cors_origin_list(self) -> list[str]:
         return [o.strip() for o in self.cors_origins.split(",") if o.strip()]

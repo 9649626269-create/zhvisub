@@ -8,6 +8,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from app.api.jobs import router as jobs_router
+from app.api.auth import router as auth_router
+from app.api.settings import router as settings_router
 from app.api.schemas import ErrorResponse, VoiceItem
 from app.config import settings
 from app.db import init_db
@@ -81,5 +83,7 @@ async def get_voices():
     return voices
 
 
-# Include Jobs router
+# Include routers
 app.include_router(jobs_router)
+app.include_router(auth_router)
+app.include_router(settings_router)

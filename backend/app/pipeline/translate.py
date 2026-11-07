@@ -21,6 +21,9 @@ def _translate_batch_llm(
     context_after: list[dict] | None = None,
     glossary: dict[str, str] | None = None,
     retry_count: int = 0,
+    api_key: str | None = None,
+    base_url: str | None = None,
+    model: str | None = None,
 ) -> list[dict]:
     """
     Translate a batch of segments using OpenAI-compatible LLM.
@@ -31,15 +34,27 @@ def _translate_batch_llm(
         context_after: 2-3 following segments for context.
         glossary: Accumulated proper name translations.
         retry_count: Current retry attempt.
+        api_key: Optional custom API key (user-provided or server default).
+        base_url: Optional custom Base URL.
+        model: Optional model name.
     
     Returns:
         List of {"id": int, "vi": str}.
     """
     from openai import OpenAI, APIError, RateLimitError
+
+    target_key = api_key or settings.llm_api_key or "dummy"
+    target_base = base_url or settings.llm_base_url
+    target_model = model or settings.llm_model
+
+    # If it's a Google Gemini API key and no explicit custom base_url was set
+    if target_key.startswith("AIza") and not base_url:
+        target_base = "https://generativelanguage.googleapis.com/v1beta/openai/"
+        target_model = model or "gemini-1.5-flash"
     
     client = OpenAI(
-        base_url=settings.llm_base_url,
-        api_key=settings.llm_api_key or "dummy",
+        base_url=target_base,
+        api_key=target_key,
     )
     
     # Build context strings
@@ -80,7 +95,7 @@ def _translate_batch_llm(
     for attempt in range(max_retries + 1):
         try:
             response = client.chat.completions.create(
-                model=settings.llm_model,
+                model=target_model,
                 messages=[
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_prompt},
@@ -209,6 +224,9 @@ def translate_segments(
     batch_size: int = 20,
     progress_callback: Optional[Callable[[float, str], None]] = None,
     cancel_check: Optional[Callable[[], bool]] = None,
+    api_key: Optional[str] = None,
+    base_url: Optional[str] = None,
+    model: Optional[str] = None,
 ) -> list[dict]:
     """
     Translate all segments from Chinese to Vietnamese.
@@ -218,6 +236,9 @@ def translate_segments(
         batch_size: Number of segments per LLM batch.
         progress_callback: Called with (fraction 0-1, log_message).
         cancel_check: Returns True if job should be cancelled.
+        api_key: Optional custom API key.
+        base_url: Optional custom Base URL.
+        model: Optional model name.
     
     Returns:
         Same list with added "vi" field.
@@ -245,7 +266,8 @@ def translate_segments(
         
         # Try LLM first
         result = _translate_batch_llm(
-            batch, ctx_before, ctx_after, glossary
+            batch, ctx_before, ctx_after, glossary,
+            api_key=api_key, base_url=base_url, model=model,
         )
         
         if result is not None:

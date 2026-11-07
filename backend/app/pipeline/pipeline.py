@@ -40,6 +40,12 @@ class PipelineOptions:
     dub_rate: str = "+0%"
     orig_audio: str = "duck"  # "duck" | "mute" | "keep"
 
+    # Translation & AI Key options
+    translate_engine: str = "gemini"  # "gemini" | "openai" | "fallback"
+    api_key: Optional[str] = None
+    api_base_url: Optional[str] = None
+    llm_model: Optional[str] = None
+
     # Custom manual blur regions (optional override from frontend)
     custom_blur_regions: Optional[list[dict]] = None
 
@@ -205,10 +211,19 @@ def run_pipeline(
     def _tr_prog(frac: float, msg: str):
         tracker.update(frac, msg)
 
+    extra_translate_kwargs = {}
+    if options.api_key:
+        extra_translate_kwargs["api_key"] = options.api_key
+    if options.api_base_url:
+        extra_translate_kwargs["base_url"] = options.api_base_url
+    if options.llm_model:
+        extra_translate_kwargs["model"] = options.llm_model
+
     translated_segments = translate_segments(
         segments_data,
         progress_callback=_tr_prog,
         cancel_check=cancel_check,
+        **extra_translate_kwargs,
     )
     tracker.update(1.0, f"Đã dịch xong {len(translated_segments)} câu")
 

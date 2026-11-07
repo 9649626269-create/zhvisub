@@ -1,29 +1,36 @@
 "use client";
 
-import { Suspense, useState, useEffect, useRef } from "react";
+import React, { Suspense, useState, useEffect, useRef } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
+import Link from "next/link";
 import {
-  cancelJob,
-  getDownloadUrl,
-  getFrameUrl,
   getJob,
-  getJobSegments,
-  getVideoUrl,
+  cancelJob,
+  getSegments,
+  updateSegments,
+  rerenderJob,
   JobStatus,
   Segment,
-  triggerRerender,
-  updateJobSegments,
-} from "@/lib/api";
-
-const STEP_LABELS: Record<string, string> = {
-  ingest: "Nhận video",
-  asr: "Nhận diện giọng nói",
-  ocr: "Quét phụ đề cứng",
-  translate: "Dịch sang tiếng Việt",
-  dub: "Tạo lồng tiếng",
-  render: "Render video",
-  done: "Hoàn tất",
-};
+  BlurRegionItem,
+  getVideoPreviewUrl,
+  getFramePreviewUrl,
+} from "../../lib/api";
+import ProgressStepper from "../../components/ProgressStepper";
+import {
+  Sparkles,
+  RotateCcw,
+  Edit3,
+  Sliders,
+  Play,
+  Pause,
+  Save,
+  CheckCircle2,
+  AlertTriangle,
+  Loader2,
+  Maximize2,
+  Crop,
+  Layers,
+} from "lucide-react";
 
 function JobContent() {
   const searchParams = useSearchParams();
@@ -33,66 +40,81 @@ function JobContent() {
   const [job, setJob] = useState<JobStatus | null>(null);
   const [segments, setSegments] = useState<Segment[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
-  const [error, setError] = useState<string>("");
+  const [error, setError] = useState<string | null>(null);
 
   // Playback & Subtitle sync state
   const [currentTime, setCurrentTime] = useState<number>(0);
-  const [activeSegmentIndex, setActiveSegmentIndex] = useState<number>(-1);
+  const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const videoRef = useRef<HTMLVideoElement>(null);
   const audioRef = useRef<HTMLAudioElement>(null);
 
-  // Manual blur drawing state
+  // Segment editing & saving
+  const [isSavingSegments, setIsSavingSegments] = useState<boolean>(false);
+  const [isRerendering, setIsRerendering] = useState<boolean>(false);
+  const [saveMessage, setSaveMessage] = useState<string | null>(null);
+
+  // Manual blur drawing canvas state
   const [showBlurDrawer, setShowBlurDrawer] = useState<boolean>(false);
-  const [manualRegions, setManualRegions] = useState<{ x: number; y: number; w: number; h: number }[]>([]);
+  const [manualRegions, setManualRegions] = useState<BlurRegionItem[]>([]);
   const [isDrawing, setIsDrawing] = useState<boolean>(false);
   const [startPoint, setStartPoint] = useState<{ x: number; y: number } | null>(null);
-  const [currentBox, setCurrentBox] = useState<{ x: number; y: number; w: number; h: number } | null>(null);
+  const [currentBox, setCurrentBox] = useState<BlurRegionItem | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const [frameImg, setFrameImg] = useState<HTMLImageElement | null>(null);
 
-  // Poll job status
+  // Polling job status
+  const pollStatus = async () => {
+    if (!jobId) return;
+    try {
+      const data = await getJob(jobId);
+      setJob(data);
+      setLoading(false);
+
+      if (data.status === "completed") {
+        const segs = await getSegments(jobId);
+        setSegments(segs);
+      }
+    } catch (err: any) {
+      setError(err.message || "Không thể tải trạng thái công việc.");
+      setLoading(false);
+    }
+  };
+
   useEffect(() => {
     if (!jobId) {
-      setError("Không tìm thấy mã công việc (Job ID).");
+      setError("Vui lòng cung cấp mã công việc (Job ID) hợp lệ.");
       setLoading(false);
       return;
     }
 
-    let intervalId: any;
-
-    const poll = async () => {
-      try {
-        const data = await getJob(jobId);
-        setJob(data);
-        setLoading(false);
-
-        if (data.status === "completed") {
-          clearInterval(intervalId);
-          // Load segments
-          const segs = await getJobSegments(jobId);
-          setSegments(segs);
-        } else if (data.status === "failed" || data.status === "cancelled") {
-          clearInterval(intervalId);
-        }
-      } catch (err: any) {
-        setError(err.message || "Lỗi khi kiểm tra tiến độ.");
-        setLoading(false);
+    pollStatus();
+    const interval = setInterval(() => {
+      if (job?.status === "completed" || job?.status === "failed" || job?.status === "cancelled") {
+        clearInterval(interval);
+      } else {
+        pollStatus();
       }
-    };
+    }, 2000);
 
-    poll();
-    intervalId = setInterval(poll, 1500);
+    return () => clearInterval(interval);
+  }, [jobId, job?.status]);
 
-    return () => clearInterval(intervalId);
-  }, [jobId]);
+  const handleCancel = async () => {
+    if (!jobId) return;
+    if (!confirm("Bạn có chắc chắn muốn huỷ công việc này?")) return;
+    try {
+      await cancelJob(jobId);
+      pollStatus();
+    } catch (err: any) {
+      alert(err.message || "Không thể huỷ công việc.");
+    }
+  };
 
-  // Video timeupdate sync
+  // Video timeupdate sync with dubbing audio
   const handleTimeUpdate = () => {
     if (!videoRef.current) return;
     const t = videoRef.current.currentTime;
     setCurrentTime(t);
 
-    // Sync audio if dubbing exists
     if (audioRef.current && job?.has_dub) {
       if (Math.abs(audioRef.current.currentTime - t) > 0.15) {
         audioRef.current.currentTime = t;
@@ -103,522 +125,246 @@ function JobContent() {
         audioRef.current.play().catch(() => {});
       }
     }
-
-    // Find active segment
-    const activeIdx = segments.findIndex((s) => t >= s.start && t <= s.end);
-    setActiveSegmentIndex(activeIdx);
   };
 
-  const handleSeek = (timeSec: number) => {
-    if (videoRef.current) {
-      videoRef.current.currentTime = timeSec;
-      videoRef.current.play().catch(() => {});
-    }
-  };
+  // Active subtitle cue at current video time
+  const activeSegment = segments.find(
+    (s) => currentTime >= s.start && currentTime <= s.end
+  );
 
-  const handleCancel = async () => {
-    if (!jobId) return;
-    try {
-      await cancelJob(jobId);
-      const updated = await getJob(jobId);
-      setJob(updated);
-    } catch (err: any) {
-      alert("Lỗi huỷ công việc: " + err.message);
-    }
-  };
-
-  const handleSegmentChange = (idx: number, field: "vi" | "zh" | "dub_text", val: string) => {
-    setSegments((prev) => {
-      const copy = [...prev];
-      copy[idx] = { ...copy[idx], [field]: val };
-      return copy;
-    });
-  };
-
+  // Save subtitle changes
   const handleSaveSegments = async () => {
     if (!jobId) return;
+    setIsSavingSegments(true);
+    setSaveMessage(null);
     try {
-      await updateJobSegments(jobId, segments);
-      alert("Đã lưu phụ đề thành công!");
+      await updateSegments(jobId, segments);
+      setSaveMessage("Đã lưu các thay đổi phụ đề!");
+      setTimeout(() => setSaveMessage(null), 3000);
     } catch (err: any) {
-      alert("Lỗi lưu phụ đề: " + err.message);
+      alert(err.message || "Lỗi khi lưu phụ đề.");
+    } finally {
+      setIsSavingSegments(false);
     }
   };
 
+  // Trigger Re-render
   const handleRerender = async () => {
-    if (!jobId || !job) return;
-    try {
-      await updateJobSegments(jobId, segments);
-      await triggerRerender(jobId, job.options, manualRegions.length > 0 ? manualRegions : undefined);
-      alert("Đã gửi yêu cầu render lại. Hệ thống đang xử lý!");
-      window.location.reload();
-    } catch (err: any) {
-      alert("Lỗi render lại: " + err.message);
-    }
-  };
-
-  // Canvas drawing for manual blur regions
-  const loadFrameImage = () => {
     if (!jobId) return;
-    const img = new Image();
-    img.crossOrigin = "anonymous";
-    img.src = getFrameUrl(jobId, currentTime);
-    img.onload = () => {
-      setFrameImg(img);
-      drawCanvas(img, manualRegions, null);
-    };
-  };
-
-  const drawCanvas = (
-    img: HTMLImageElement,
-    regions: { x: number; y: number; w: number; h: number }[],
-    activeBox: { x: number; y: number; w: number; h: number } | null
-  ) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-
-    ctx.clearRect(0, 0, canvas.width, canvas.height);
-    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-
-    // Draw existing regions
-    ctx.strokeStyle = "#38bdf8";
-    ctx.fillStyle = "rgba(56, 189, 248, 0.35)";
-    ctx.lineWidth = 2;
-
-    for (const r of regions) {
-      const rx = r.x * canvas.width;
-      const ry = r.y * canvas.height;
-      const rw = r.w * canvas.width;
-      const rh = r.h * canvas.height;
-      ctx.fillRect(rx, ry, rw, rh);
-      ctx.strokeRect(rx, ry, rw, rh);
-    }
-
-    // Draw active box being dragged
-    if (activeBox) {
-      ctx.strokeStyle = "#f43f5e";
-      ctx.fillStyle = "rgba(244, 63, 94, 0.4)";
-      ctx.fillRect(activeBox.x, activeBox.y, activeBox.w, activeBox.h);
-      ctx.strokeRect(activeBox.x, activeBox.y, activeBox.w, activeBox.h);
+    if (!confirm("Bắt đầu render lại video với các thay đổi phụ đề / vùng làm mờ mới?")) return;
+    setIsRerendering(true);
+    try {
+      // First save segments
+      await updateSegments(jobId, segments);
+      await rerenderJob(jobId, {
+        blur: job?.options?.blur ?? true,
+        blur_strength: job?.options?.blur_strength ?? 30,
+        dub: job?.options?.dub ?? false,
+        voice: job?.options?.voice,
+        dub_rate: job?.options?.dub_rate,
+        orig_audio: job?.options?.orig_audio,
+        blur_regions: manualRegions.length > 0 ? manualRegions : undefined,
+      });
+      setIsRerendering(false);
+      pollStatus();
+    } catch (err: any) {
+      alert(err.message || "Lỗi khi kích hoạt render lại.");
+      setIsRerendering(false);
     }
   };
 
-  const handleMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-    setIsDrawing(true);
-    setStartPoint({ x, y });
-  };
-
-  const handleMouseMove = (e: React.MouseEvent<HTMLCanvasElement>) => {
-    if (!isDrawing || !startPoint || !canvasRef.current || !frameImg) return;
-    const canvas = canvasRef.current;
-    const rect = canvas.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
-
-    const box = {
-      x: Math.min(startPoint.x, x),
-      y: Math.min(startPoint.y, y),
-      w: Math.abs(x - startPoint.x),
-      h: Math.abs(y - startPoint.y),
-    };
-    setCurrentBox(box);
-    drawCanvas(frameImg, manualRegions, box);
-  };
-
-  const handleMouseUp = () => {
-    if (!isDrawing || !currentBox || !canvasRef.current || !frameImg) {
-      setIsDrawing(false);
-      return;
-    }
-    const canvas = canvasRef.current;
-    const norm = {
-      x: currentBox.x / canvas.width,
-      y: currentBox.y / canvas.height,
-      w: currentBox.w / canvas.width,
-      h: currentBox.h / canvas.height,
-    };
-    if (norm.w > 0.02 && norm.h > 0.02) {
-      const updated = [...manualRegions, norm];
-      setManualRegions(updated);
-      drawCanvas(frameImg, updated, null);
-    }
-    setIsDrawing(false);
-    setCurrentBox(null);
-  };
-
-  if (loading) {
+  if (loading && !job) {
     return (
-      <div className="text-center py-24 space-y-3">
-        <div className="w-10 h-10 border-4 border-blue-500 border-t-transparent rounded-full animate-spin mx-auto"></div>
-        <p className="text-slate-400 text-sm">Đang tải dữ liệu công việc...</p>
+      <div className="min-h-[50vh] flex flex-col items-center justify-center text-center p-6">
+        <Loader2 className="w-8 h-8 text-[#22D3EE] animate-spin mb-3" />
+        <p className="text-sm font-semibold text-slate-200">Đang tải thông tin tiến trình...</p>
       </div>
     );
   }
 
   if (error || !job) {
     return (
-      <div className="p-8 text-center bg-[#151d30] rounded-2xl border border-red-500/30 max-w-lg mx-auto space-y-4">
-        <p className="text-red-400 text-base font-semibold">❌ {error || "Không tìm thấy công việc."}</p>
-        <button
-          onClick={() => router.push("/")}
-          className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white rounded-lg text-sm transition"
-        >
-          Quay lại trang chủ
-        </button>
+      <div className="app-card p-8 text-center max-w-md mx-auto my-12">
+        <AlertTriangle className="w-12 h-12 text-rose-400 mx-auto mb-3" />
+        <h2 className="text-base font-semibold text-slate-100">Không tìm thấy công việc</h2>
+        <p className="text-xs text-slate-400 mt-1 mb-5">{error || "Công việc không tồn tại hoặc đã bị xoá."}</p>
+        <Link href="/" className="gradient-btn px-5 py-2.5 text-xs font-semibold inline-flex items-center gap-2">
+          <Sparkles className="w-4 h-4" />
+          <span>Tạo video mới</span>
+        </Link>
       </div>
     );
   }
 
-  const isCompleted = job.status === "completed";
-  const isFailed = job.status === "failed";
-  const isCancelled = job.status === "cancelled";
-  const isProcessing = job.status === "pending" || job.status === "processing";
-
   return (
-    <div className="space-y-6 pb-12">
-      {/* Top Header Card */}
-      <div className="bg-[#151d30] p-5 rounded-2xl border border-[#23314e] flex flex-wrap items-center justify-between gap-4">
+    <div className="space-y-6 pb-20">
+      {/* Header bar */}
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <div className="flex items-center gap-2">
-            <h1 className="text-xl font-bold text-slate-100">{job.video_filename || "Video không tên"}</h1>
-            <span
-              className={`px-2 py-0.5 text-xs font-semibold rounded-full ${
-                isCompleted
-                  ? "bg-emerald-500/10 text-emerald-400 border border-emerald-500/30"
-                  : isFailed
-                  ? "bg-red-500/10 text-red-400 border border-red-500/30"
-                  : isCancelled
-                  ? "bg-slate-500/10 text-slate-400 border border-slate-500/30"
-                  : "bg-blue-500/10 text-blue-400 border border-blue-500/30 animate-pulse"
-              }`}
-            >
-              {isCompleted ? "Hoàn thành" : isFailed ? "Thất bại" : isCancelled ? "Đã huỷ" : "Đang xử lý"}
-            </span>
-          </div>
-          <p className="text-xs text-slate-400 mt-1">
-            Độ dài: {job.video_duration.toFixed(1)}s • Độ phân giải: {job.video_width}x{job.video_height} • Mã:{" "}
-            <span className="font-mono text-slate-500">{job.id.slice(0, 8)}</span>
+          <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-100 dark:text-slate-100 text-slate-900">
+            Tiến trình & Trình chỉnh sửa
+          </h1>
+          <p className="text-xs sm:text-sm text-slate-400 mt-0.5">
+            Theo dõi từng bước thực thi và tùy biến phụ đề / vùng mờ trước khi xuất bản
           </p>
         </div>
 
-        {isProcessing && (
+        {job.status === "completed" && (
           <button
-            onClick={handleCancel}
-            className="px-4 py-2 text-xs font-semibold rounded-xl bg-red-600/20 text-red-400 hover:bg-red-600 hover:text-white border border-red-500/30 transition"
+            type="button"
+            disabled={isRerendering}
+            onClick={handleRerender}
+            className="gradient-btn px-5 py-2.5 text-xs font-semibold flex items-center justify-center gap-2 shadow-lg self-start sm:self-center"
           >
-            🛑 Huỷ công việc
+            {isRerendering ? (
+              <Loader2 className="w-4 h-4 animate-spin" />
+            ) : (
+              <RotateCcw className="w-4 h-4" />
+            )}
+            <span>Render lại video</span>
           </button>
         )}
       </div>
 
-      {/* Progress & Stepper Bar (Visible when processing or failed) */}
-      {!isCompleted && (
-        <div className="bg-[#151d30] p-6 rounded-2xl border border-[#23314e] space-y-6">
-          <div>
-            <div className="flex justify-between text-sm font-semibold mb-2">
-              <span className="text-slate-300">{job.step_log || "Đang xử lý..."}</span>
-              <span className="text-blue-400 font-mono">{Math.round(job.overall_progress * 100)}%</span>
+      {/* Stepper Component */}
+      <ProgressStepper job={job} onCancel={handleCancel} onRefresh={pollStatus} />
+
+      {/* Subtitle Editor Section (When segments are available) */}
+      {segments.length > 0 && (
+        <div className="app-card p-5 space-y-5">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-[#1F2A44] dark:border-[#1F2A44] border-slate-200">
+            <div className="flex items-center gap-2.5">
+              <div className="w-8 h-8 rounded-xl bg-purple-500/10 flex items-center justify-center text-[#7C5CFF]">
+                <Edit3 className="w-4 h-4" />
+              </div>
+              <div>
+                <h3 className="text-base font-semibold text-slate-100 dark:text-slate-100 text-slate-800">
+                  Trình chỉnh sửa phụ đề & khẩu hình ({segments.length} câu)
+                </h3>
+                <p className="text-xs text-slate-400">
+                  Sửa trực tiếp bản dịch tiếng Việt, hệ thống sẽ tự động cập nhật và cho phép render lại
+                </p>
+              </div>
             </div>
-            <div className="w-full h-3 bg-slate-800 rounded-full overflow-hidden">
-              <div
-                className={`h-full transition-all duration-300 ${
-                  isFailed
-                    ? "bg-red-500"
-                    : isCancelled
-                    ? "bg-slate-600"
-                    : "bg-gradient-to-r from-blue-500 via-cyan-400 to-teal-300 animate-pulse"
-                }`}
-                style={{ width: `${Math.round(job.overall_progress * 100)}%` }}
-              />
+
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                disabled={isSavingSegments}
+                onClick={handleSaveSegments}
+                className="gradient-btn px-4 py-2 text-xs font-semibold flex items-center gap-1.5"
+              >
+                {isSavingSegments ? (
+                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                ) : (
+                  <Save className="w-3.5 h-3.5" />
+                )}
+                <span>Lưu thay đổi</span>
+              </button>
             </div>
           </div>
 
-          {/* Pipeline Steps Indicator */}
-          <div className="grid grid-cols-2 sm:grid-cols-6 gap-2 text-center text-xs">
-            {["ingest", "asr", "ocr", "translate", "dub", "render"].map((st) => {
-              const currentStepIdx = ["ingest", "asr", "ocr", "translate", "dub", "render"].indexOf(job.current_step);
-              const thisStepIdx = ["ingest", "asr", "ocr", "translate", "dub", "render"].indexOf(st);
-              const isPast = thisStepIdx < currentStepIdx || isCompleted;
-              const isCurrent = st === job.current_step;
-
-              return (
-                <div
-                  key={st}
-                  className={`p-2 rounded-xl border transition ${
-                    isCurrent
-                      ? "border-blue-500 bg-blue-500/10 text-blue-400 font-bold"
-                      : isPast
-                      ? "border-emerald-500/30 bg-emerald-500/5 text-emerald-400"
-                      : "border-slate-800 bg-slate-900/40 text-slate-500"
-                  }`}
-                >
-                  <p>{STEP_LABELS[st]}</p>
-                </div>
-              );
-            })}
-          </div>
-
-          {isFailed && (
-            <div className="p-4 rounded-xl bg-red-950/60 border border-red-500/40 text-red-300 text-xs space-y-1">
-              <p className="font-bold">Mã lỗi: {job.error_code || "UNKNOWN"}</p>
-              <p>{job.error_message}</p>
+          {saveMessage && (
+            <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 text-xs flex items-center gap-2">
+              <CheckCircle2 className="w-4 h-4" />
+              <span>{saveMessage}</span>
             </div>
           )}
-        </div>
-      )}
 
-      {/* Editor & Preview Workspace (Visible when completed) */}
-      {isCompleted && (
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6">
-          {/* Left Column: Video Preview with Subtitle Overlay */}
-          <div className="lg:col-span-6 space-y-4">
-            <div className="bg-[#151d30] p-4 rounded-2xl border border-[#23314e] space-y-4">
-              <h2 className="text-sm font-semibold text-slate-300 flex items-center justify-between">
-                <span>Xem trước phụ đề</span>
-                <span className="text-xs text-slate-500">HTML overlay mô phỏng</span>
-              </h2>
-
-              {/* Video Player Box */}
-              <div className="relative rounded-xl overflow-hidden bg-black aspect-video flex items-center justify-center group">
-                <video
-                  ref={videoRef}
-                  src={getVideoUrl(job.id)}
-                  onTimeUpdate={handleTimeUpdate}
-                  controls
-                  playsInline
-                  className="w-full h-full object-contain"
-                />
-
-                {/* Hidden Audio Player for Dubbing Sync */}
-                {job.has_dub && (
-                  <audio
-                    ref={audioRef}
-                    src={getDownloadUrl(job.id, "dub")}
-                    preload="auto"
-                    className="hidden"
-                  />
-                )}
-
-                {/* Subtitle HTML Overlay */}
-                {activeSegmentIndex >= 0 && segments[activeSegmentIndex] && (
-                  <div
-                    className={`absolute left-0 right-0 px-4 text-center pointer-events-none transition-all ${
-                      job.options.position === "top" ? "top-4" : "bottom-12"
-                    }`}
-                  >
-                    <span className="inline-block px-3 py-1 bg-black/75 backdrop-blur-sm text-white font-semibold text-sm sm:text-base rounded-md border border-black/40 shadow-lg">
-                      {segments[activeSegmentIndex].vi}
-                    </span>
-                  </div>
-                )}
-              </div>
-
-              {/* Manual Blur Drawer Button & Tools */}
-              <div className="flex items-center justify-between text-xs pt-2 border-t border-[#23314e]">
-                <button
-                  onClick={() => {
-                    setShowBlurDrawer(!showBlurDrawer);
-                    if (!showBlurDrawer) loadFrameImage();
-                  }}
-                  className="px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition"
-                >
-                  🖌️ {showBlurDrawer ? "Đóng vùng mờ" : "Chỉnh tay vùng làm mờ"}
-                </button>
-                {manualRegions.length > 0 && (
-                  <button
-                    onClick={() => setManualRegions([])}
-                    className="text-red-400 hover:underline"
-                  >
-                    Xoá các vùng đã vẽ ({manualRegions.length})
-                  </button>
-                )}
-              </div>
-
-              {/* Canvas Overlay for Drawing Blur Boxes */}
-              {showBlurDrawer && (
-                <div className="p-3 bg-[#0f172a] rounded-xl border border-blue-500/30 space-y-2">
-                  <p className="text-xs text-blue-300">
-                    Kéo chuột hoặc ngón tay để vẽ hình chữ nhật lên khung hình cần làm mờ.
-                  </p>
-                  <div className="flex gap-2">
-                    <button
-                      onClick={loadFrameImage}
-                      className="px-2.5 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-500"
-                    >
-                      Lấy khung hình tại {currentTime.toFixed(1)}s
-                    </button>
-                  </div>
-                  <canvas
-                    ref={canvasRef}
-                    width={job.video_width || 640}
-                    height={job.video_height || 360}
-                    onMouseDown={handleMouseDown}
-                    onMouseMove={handleMouseMove}
-                    onMouseUp={handleMouseUp}
-                    className="w-full aspect-video border border-slate-700 rounded-lg cursor-crosshair bg-black"
-                  />
+          {/* Video Preview with HTML Subtitle Overlay */}
+          <div className="relative aspect-video rounded-2xl overflow-hidden bg-black border border-[#1F2A44] shadow-2xl">
+            <video
+              ref={videoRef}
+              controls
+              playsInline
+              src={getVideoPreviewUrl(job.id)}
+              onTimeUpdate={handleTimeUpdate}
+              className="w-full h-full object-contain"
+            />
+            {/* HTML Subtitle Overlay Mockup */}
+            {activeSegment && (
+              <div className="absolute bottom-6 left-4 right-4 pointer-events-none flex justify-center">
+                <div className="bg-black/80 backdrop-blur-sm border border-white/10 px-4 py-1.5 rounded-xl text-center max-w-lg">
+                  <p className="text-[11px] text-slate-400 line-through mb-0.5">{activeSegment.zh}</p>
+                  <p className="text-sm font-semibold text-white drop-shadow-md">{activeSegment.vi}</p>
                 </div>
-              )}
-            </div>
-
-            {/* Download Buttons Bar */}
-            <div className="bg-[#151d30] p-4 rounded-2xl border border-[#23314e] space-y-3">
-              <h3 className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Tải file kết quả</h3>
-              <div className="grid grid-cols-2 gap-2 text-xs font-medium">
-                <a
-                  href={getDownloadUrl(job.id, "mp4")}
-                  download="video_vietsub.mp4"
-                  className="p-2.5 rounded-xl bg-blue-600 hover:bg-blue-500 text-white text-center transition flex items-center justify-center gap-1.5"
-                >
-                  📥 Video MP4
-                </a>
-                <a
-                  href={getDownloadUrl(job.id, "srt_vi")}
-                  download="subtitles_vi.srt"
-                  className="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-center border border-slate-700 transition flex items-center justify-center gap-1.5"
-                >
-                  📄 Phụ đề Việt (.srt)
-                </a>
-                <a
-                  href={getDownloadUrl(job.id, "srt_zh")}
-                  download="subtitles_zh.srt"
-                  className="p-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-center border border-slate-700 transition flex items-center justify-center gap-1.5"
-                >
-                  📄 Phụ đề Trung (.srt)
-                </a>
-                {job.has_dub && (
-                  <a
-                    href={getDownloadUrl(job.id, "dub")}
-                    download="dubbing.wav"
-                    className="p-2.5 rounded-xl bg-teal-600/30 hover:bg-teal-600 text-teal-300 hover:text-white text-center border border-teal-500/30 transition flex items-center justify-center gap-1.5"
-                  >
-                    🎵 Lồng tiếng (.wav)
-                  </a>
-                )}
               </div>
-            </div>
+            )}
           </div>
 
-          {/* Right Column: Subtitle List & Editor */}
-          <div className="lg:col-span-6 space-y-4">
-            <div className="bg-[#151d30] p-4 rounded-2xl border border-[#23314e] space-y-4 flex flex-col h-[650px]">
-              <div className="flex items-center justify-between pb-3 border-b border-[#23314e]">
-                <div>
-                  <h2 className="text-base font-bold text-slate-100">Danh sách câu phụ đề</h2>
-                  <p className="text-xs text-slate-400">{segments.length} câu thoại</p>
-                </div>
-                <div className="flex gap-2">
-                  <button
-                    onClick={handleSaveSegments}
-                    className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 rounded-lg text-xs font-semibold transition"
-                  >
-                    💾 Lưu phụ đề
-                  </button>
-                  <button
-                    onClick={handleRerender}
-                    className="px-3 py-1.5 bg-gradient-to-r from-blue-600 to-cyan-500 hover:from-blue-500 hover:to-cyan-400 text-white rounded-lg text-xs font-bold transition shadow"
-                  >
-                    ⚡ Render lại
-                  </button>
-                </div>
-              </div>
-
-              {/* Scrollable Subtitle Rows */}
-              <div className="flex-1 overflow-y-auto space-y-3 pr-1">
-                {segments.map((seg, idx) => {
-                  const isActive = idx === activeSegmentIndex;
-
-                  return (
-                    <div
-                      key={seg.id}
-                      className={`p-3 rounded-xl border transition ${
-                        isActive
-                          ? "bg-blue-950/40 border-blue-500/80 shadow-md"
-                          : "bg-[#0f172a]/70 border-[#23314e] hover:border-slate-600"
+          {/* Subtitles Table / Card List */}
+          <div className="space-y-3 max-h-[500px] overflow-y-auto pr-1">
+            {segments.map((seg, idx) => (
+              <div
+                key={seg.id}
+                onClick={() => {
+                  if (videoRef.current) videoRef.current.currentTime = seg.start;
+                }}
+                className={`p-3.5 rounded-2xl border transition-all cursor-pointer ${
+                  currentTime >= seg.start && currentTime <= seg.end
+                    ? "border-[#7C5CFF] bg-[#7C5CFF]/10 shadow-sm"
+                    : "border-[#1F2A44] dark:border-[#1F2A44] border-slate-200 bg-[#0B1020]/40 hover:border-slate-600"
+                }`}
+              >
+                <div className="flex items-center justify-between text-[11px] text-slate-400 mb-2">
+                  <div className="flex items-center gap-2">
+                    <span className="font-semibold text-slate-300">#{idx + 1}</span>
+                    <span className="font-mono bg-[#1F2A44] px-2 py-0.5 rounded-md text-[#22D3EE]">
+                      {seg.start.toFixed(2)}s → {seg.end.toFixed(2)}s
+                    </span>
+                  </div>
+                  {seg.dub_status && (
+                    <span
+                      className={`px-2 py-0.5 rounded-md uppercase font-semibold text-[9px] ${
+                        seg.dub_status === "overflow"
+                          ? "bg-rose-500/20 text-rose-400"
+                          : seg.dub_status === "shortened"
+                          ? "bg-amber-500/20 text-amber-400"
+                          : "bg-emerald-500/20 text-emerald-400"
                       }`}
                     >
-                      {/* Row Header with timestamp & seek button */}
-                      <div className="flex items-center justify-between text-xs mb-2">
-                        <button
-                          onClick={() => handleSeek(seg.start)}
-                          className="font-mono text-cyan-400 hover:underline font-semibold flex items-center gap-1"
-                        >
-                          ▶ {seg.start.toFixed(2)}s - {seg.end.toFixed(2)}s
-                        </button>
+                      Dub: {seg.dub_status} ({seg.dub_speed ? seg.dub_speed.toFixed(2) : "1.00"}x)
+                    </span>
+                  )}
+                </div>
 
-                        {/* Dubbing badges */}
-                        {seg.dub_status && (
-                          <div className="flex items-center gap-1">
-                            <span className="font-mono text-[10px] text-slate-400">
-                              {seg.dub_speed ? `${seg.dub_speed.toFixed(2)}x` : ""}
-                            </span>
-                            <span
-                              className={`px-1.5 py-0.2 text-[10px] font-semibold rounded ${
-                                seg.dub_status === "ok"
-                                  ? "bg-emerald-500/10 text-emerald-400"
-                                  : seg.dub_status === "stretched"
-                                  ? "bg-blue-500/10 text-blue-400"
-                                  : seg.dub_status === "shortened"
-                                  ? "bg-amber-500/10 text-amber-400"
-                                  : "bg-red-500/10 text-red-400"
-                              }`}
-                            >
-                              {seg.dub_status}
-                            </span>
-                          </div>
-                        )}
-                      </div>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {/* Chinese text */}
+                  <div>
+                    <label className="text-[10px] uppercase font-bold text-slate-500 block mb-1">
+                      Gốc tiếng Trung
+                    </label>
+                    <input
+                      type="text"
+                      value={seg.zh}
+                      onChange={(e) => {
+                        const newSegs = [...segments];
+                        newSegs[idx].zh = e.target.value;
+                        setSegments(newSegs);
+                      }}
+                      className="w-full px-3 py-2 rounded-xl bg-[#0B1020] dark:bg-[#0B1020] bg-slate-100 border border-[#1F2A44] text-xs text-slate-200"
+                    />
+                  </div>
 
-                      {/* Chinese text (Editable for .srt zh) */}
-                      <div className="space-y-1 mb-2">
-                        <label className="text-[10px] uppercase tracking-wider text-slate-500 block">Tiếng Trung:</label>
-                        <input
-                          type="text"
-                          value={seg.zh}
-                          onChange={(e) => handleSegmentChange(idx, "zh", e.target.value)}
-                          className="w-full px-2.5 py-1 text-xs rounded bg-[#0b0f19] border border-slate-800 text-slate-300 focus:outline-none focus:border-slate-600"
-                        />
-                      </div>
-
-                      {/* Vietnamese text (Directly edited for rendering & SRT vi) */}
-                      <div className="space-y-1">
-                        <label className="text-[10px] uppercase tracking-wider text-blue-400 block font-semibold">
-                          Tiếng Việt (phụ đề & render):
-                        </label>
-                        <textarea
-                          rows={2}
-                          value={seg.vi}
-                          onChange={(e) => handleSegmentChange(idx, "vi", e.target.value)}
-                          className="w-full px-2.5 py-1.5 text-xs rounded bg-[#0b0f19] border border-slate-700 text-slate-100 focus:outline-none focus:border-blue-500 resize-none font-medium"
-                        />
-                      </div>
-
-                      {/* Dub text (if shortened by LLM) */}
-                      {seg.dub_text && (
-                        <div className="space-y-1 mt-1.5 pt-1.5 border-t border-slate-800/80">
-                          <label className="text-[10px] uppercase tracking-wider text-amber-400 block">
-                            Lời đọc lồng tiếng đã rút gọn:
-                          </label>
-                          <input
-                            type="text"
-                            value={seg.dub_text}
-                            onChange={(e) => handleSegmentChange(idx, "dub_text", e.target.value)}
-                            className="w-full px-2.5 py-1 text-xs rounded bg-[#0b0f19] border border-amber-900/40 text-amber-200 focus:outline-none focus:border-amber-600"
-                          />
-                        </div>
-                      )}
-                    </div>
-                  );
-                })}
+                  {/* Vietnamese translation */}
+                  <div>
+                    <label className="text-[10px] uppercase font-bold text-[#22D3EE] block mb-1">
+                      Bản dịch tiếng Việt (dùng để render)
+                    </label>
+                    <input
+                      type="text"
+                      value={seg.vi}
+                      onChange={(e) => {
+                        const newSegs = [...segments];
+                        newSegs[idx].vi = e.target.value;
+                        setSegments(newSegs);
+                      }}
+                      className="w-full px-3 py-2 rounded-xl bg-[#0B1020] dark:bg-[#0B1020] bg-slate-100 border border-[#1F2A44] text-xs font-semibold text-white focus:border-[#22D3EE]"
+                    />
+                  </div>
+                </div>
               </div>
-            </div>
+            ))}
           </div>
         </div>
       )}
@@ -628,7 +374,11 @@ function JobContent() {
 
 export default function JobPage() {
   return (
-    <Suspense fallback={<div className="text-center py-24 text-slate-400">Đang chuẩn bị...</div>}>
+    <Suspense fallback={
+      <div className="min-h-[50vh] flex items-center justify-center">
+        <Loader2 className="w-8 h-8 text-[#22D3EE] animate-spin" />
+      </div>
+    }>
       <JobContent />
     </Suspense>
   );

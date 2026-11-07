@@ -85,3 +85,25 @@ class BlurRegionModel(Base):
     intervals = Column(JSON, default=list)  # list of [start_sec, end_sec]
 
     job = relationship("Job", back_populates="blur_regions")
+
+
+class UserModel(Base):
+    """Represents an authenticated user (via Google OAuth) with encrypted AI keys."""
+    __tablename__ = "users"
+
+    id = Column(String(36), primary_key=True, index=True)
+    email = Column(String(255), unique=True, index=True, nullable=False)
+    name = Column(String(255), default="")
+    picture = Column(String(512), nullable=True)
+
+    # Google OAuth credentials
+    google_sub = Column(String(255), unique=True, index=True, nullable=True)
+    google_refresh_token_enc = Column(Text, nullable=True)
+
+    # Custom AI API Key (AES-Fernet encrypted)
+    api_provider = Column(String(50), default="gemini")  # gemini, openai, anthropic, custom
+    api_key_enc = Column(Text, nullable=True)
+    api_base_url = Column(String(255), nullable=True)
+
+    created_at = Column(DateTime(timezone=True), default=utc_now)
+    updated_at = Column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
